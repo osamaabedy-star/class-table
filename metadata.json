@@ -1,0 +1,6 @@
+{
+  "name": "مسابقة جدول الضرب الاحترافية",
+  "description": "منصة تفاعلية لعمل مسابقات جدول الضرب بين الطلاب داخل الفصل مع لوحة متصدرين حية وتصميم جذاب.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
