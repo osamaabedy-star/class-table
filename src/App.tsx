@@ -49,7 +49,9 @@ import { RiyadhEbdaaLogo } from './components/RiyadhEbdaaLogo';
 import { AdminPortal } from './components/AdminPortal';
 import { StudentPickerModal } from './components/StudentPickerModal';
 import { TeacherLiveGameDashboard } from './components/TeacherLiveGameDashboard';
-import { getPublicUrl, copyToClipboard } from './utils/publicUrl';
+import { SoloPracticeGame } from './components/SoloPracticeGame';
+import { HonorBoardModal } from './components/HonorBoardModal';
+import { getPublicUrl, copyToClipboard, getCustomBaseUrl, setCustomBaseUrl } from './utils/publicUrl';
 import { 
   SchoolStudent, 
   fetchSchoolStudentsFromServer, 
@@ -296,86 +298,197 @@ interface JoinRoomViewProps {
   onJoin: (code: string, name: string) => void;
   onBack: () => void;
   onOpenPicker?: () => void;
+  schoolStudents?: SchoolStudent[];
 }
 
-const JoinRoomView: React.FC<JoinRoomViewProps> = ({ initialCode, initialName, onJoin, onBack, onOpenPicker }) => {
+const JoinRoomView: React.FC<JoinRoomViewProps> = ({
+  initialCode,
+  initialName,
+  onJoin,
+  onBack,
+  onOpenPicker,
+  schoolStudents = []
+}) => {
   const [code, setCode] = useState<string>(initialCode);
   const [name, setName] = useState<string>(initialName);
+  const [roomInfo, setRoomInfo] = useState<{ title?: string; roomType?: string; status?: string } | null>(null);
+  const [isLoadingRoom, setIsLoadingRoom] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Sync if initialName changes
+  // Sync if initialName or initialCode changes
   useEffect(() => {
     if (initialName) setName(initialName);
   }, [initialName]);
 
+  useEffect(() => {
+    if (initialCode) setCode(initialCode);
+  }, [initialCode]);
+
+  // When room code is present (e.g. from QR scan ?room=ABCD), fetch room info to confirm it's valid
+  useEffect(() => {
+    const clean = code.trim().toUpperCase();
+    if (clean.length >= 4) {
+      setIsLoadingRoom(true);
+      fetch(`/api/rooms/${clean}`)
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => {
+          if (data) {
+            setRoomInfo({
+              title: data.title,
+              roomType: data.roomType,
+              status: data.status
+            });
+          } else {
+            setRoomInfo(null);
+          }
+        })
+        .catch(() => setRoomInfo(null))
+        .finally(() => setIsLoadingRoom(false));
+    } else {
+      setRoomInfo(null);
+    }
+  }, [code]);
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!name.trim() || !code.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    onJoin(code, name);
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans p-3 flex items-center justify-center dir-rtl">
+    <div className="min-h-screen bg-slate-950 text-white font-sans p-3 sm:p-4 flex items-center justify-center dir-rtl relative overflow-hidden">
+      {/* Background ambient glow */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 right-1/4 w-72 h-72 bg-indigo-600/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 left-1/4 w-72 h-72 bg-amber-500/10 rounded-full blur-3xl" />
+      </div>
+
       <motion.div
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-sm bg-slate-900 border border-slate-800 p-5 sm:p-6 rounded-2xl md:rounded-3xl shadow-xl space-y-4"
+        initial={{ opacity: 0, y: 15, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="w-full max-w-sm bg-slate-900/90 backdrop-blur-md border border-slate-800 p-5 sm:p-6 rounded-2xl md:rounded-3xl shadow-2xl space-y-4 relative z-10"
       >
-        <div className="text-center">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center mx-auto mb-2">
-            <Users className="w-5 h-5" />
+        <div className="text-center space-y-1.5">
+          <div className="w-11 h-11 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center mx-auto shadow-inner">
+            <Users className="w-5 h-5 text-indigo-400" />
           </div>
-          <h2 className="text-lg font-black text-white">انضمام للمسابقة الأونلاين</h2>
-          <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 mt-1 inline-block">
-            يعمل لجميع الأجهزة والأصدقاء دون تسجيل دخول
-          </span>
+          <h2 className="text-lg font-black text-white">انضمام لمسابقة الأونلاين</h2>
+
+          {/* Room verification pill if scanned from QR */}
+          {code && (
+            <div className="flex items-center justify-center gap-1.5 pt-0.5">
+              <span className="text-[11px] font-bold text-slate-300">الغرفة:</span>
+              <span className="font-mono font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/30 text-xs">
+                {code}
+              </span>
+              {isLoadingRoom ? (
+                <span className="text-[10px] text-slate-400 animate-pulse">جاري التحقق...</span>
+              ) : roomInfo ? (
+                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  <span>غرفة نشطة ({roomInfo.title || 'مسابقة'})</span>
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
+                  مباشر
+                </span>
+              )}
+            </div>
+          )}
+
+          <p className="text-[10px] text-slate-400 font-medium pt-1">
+            اكتب اسمك واضغط "دخول المسابقة" للبدء فوراً دون أي تسجيل
+          </p>
         </div>
 
-        <div className="space-y-3">
+        <form onSubmit={handleSubmit} className="space-y-3 pt-1">
+          {/* Student Name Input */}
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1.5">
               <label className="text-[11px] font-bold text-slate-300">اسم الطالب / المتسابق:</label>
               {onOpenPicker && (
                 <button
                   type="button"
                   onClick={onOpenPicker}
-                  className="text-[10px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                  className="text-[10px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-lg border border-amber-500/20 transition-colors"
                 >
                   <GraduationCap className="w-3 h-3" />
-                  <span>قائمة المدرسة</span>
+                  <span>اختيار من قائمة المدرسة</span>
                 </button>
               )}
             </div>
             <input
               type="text"
-              placeholder="اكتب اسمك أو اختر من القائمة"
+              autoFocus
+              placeholder="اكتب اسمك هنا (مثال: فيصل فهد)"
               value={name}
               onChange={e => setName(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none focus:border-indigo-500 placeholder:text-slate-500"
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-500 text-right"
             />
           </div>
 
+          {/* Room Code Input */}
           <div>
-            <label className="block text-[11px] font-bold text-slate-300 mb-1">رمز الغرفة (٤ أحرف):</label>
+            <label className="block text-[11px] font-bold text-slate-300 mb-1.5">رمز الغرفة (٤ أحرف):</label>
             <input
               type="text"
               placeholder="7K9M"
               value={code.toUpperCase()}
               onChange={e => setCode(e.target.value.toUpperCase())}
               maxLength={8}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-2xl font-black text-amber-400 text-center tracking-widest outline-none focus:border-amber-400 font-mono"
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xl font-black text-amber-400 text-center tracking-widest outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition-all font-mono"
             />
           </div>
 
+          {/* Quick suggestions from school students if available */}
+          {schoolStudents.length > 0 && !name && (
+            <div className="pt-1">
+              <span className="text-[10px] font-bold text-slate-400 block mb-1">
+                أو اختر سريعاً من طلاب الصف:
+              </span>
+              <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto scrollbar-none p-1 bg-slate-950/60 rounded-xl border border-slate-800">
+                {schoolStudents.slice(0, 6).map(st => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setName(st.name)}
+                    className="text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2 py-1 rounded-lg border border-slate-700/60 transition-colors truncate max-w-[100px]"
+                  >
+                    {st.name}
+                  </button>
+                ))}
+                {schoolStudents.length > 6 && onOpenPicker && (
+                  <button
+                    type="button"
+                    onClick={onOpenPicker}
+                    className="text-[10px] font-bold text-amber-400 hover:text-amber-300 px-1.5 py-1"
+                  >
+                    + المزيد ({toHindi(schoolStudents.length)})
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Join button */}
           <button
-            onClick={() => onJoin(code, name)}
-            disabled={!name.trim() || !code.trim()}
-            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-black text-sm shadow-md shadow-indigo-600/30 transition-all flex items-center justify-center gap-1.5"
+            type="submit"
+            disabled={!name.trim() || !code.trim() || isSubmitting}
+            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-black text-sm shadow-md shadow-indigo-600/30 transition-all flex items-center justify-center gap-1.5 mt-2 active:scale-98"
           >
-            <span>دخول المسابقة فوراً</span>
+            <span>{isSubmitting ? 'جاري الدخول...' : 'دخول المسابقة فوراً'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
 
           <button
+            type="button"
             onClick={onBack}
-            className="w-full text-xs font-bold text-slate-500 hover:text-slate-300 text-center block pt-1"
+            className="w-full text-xs font-bold text-slate-400 hover:text-slate-200 text-center block pt-1.5 transition-colors"
           >
             العودة للرئيسية
           </button>
-        </div>
+        </form>
       </motion.div>
     </div>
   );
@@ -385,7 +498,8 @@ const JoinRoomView: React.FC<JoinRoomViewProps> = ({ initialCode, initialName, o
 // MAIN APP COMPONENT
 // -------------------------------------------------------------
 export default function App() {
-  const [view, setView] = useState<'home' | 'create' | 'join' | 'lobby' | 'game' | 'leaderboard' | 'direct_board' | 'admin'>('home');
+  const [view, setView] = useState<'home' | 'create' | 'join' | 'lobby' | 'game' | 'leaderboard' | 'direct_board' | 'admin' | 'solo_practice'>('home');
+  const [isHonorBoardOpen, setIsHonorBoardOpen] = useState<boolean>(false);
   const [createType, setCreateType] = useState<'duel' | 'group'>('duel');
   const [roomId, setRoomId] = useState<string>('');
   const [playerName, setPlayerName] = useState<string>('');
@@ -438,22 +552,50 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState<number>(10);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [hasAnsweredCurrent, setHasAnsweredCurrent] = useState<boolean>(false);
-  const [answerResult, setAnswerResult] = useState<{ isCorrect: boolean; points: number } | null>(null);
+  const [answerResult, setAnswerResult] = useState<{ isCorrect: boolean; points: number; correctAnswer?: number } | null>(null);
+
+  const [customDeployUrl, setCustomDeployUrl] = useState<string>(getCustomBaseUrl());
+  const [showUrlSettings, setShowUrlSettings] = useState<boolean>(false);
 
   // Synchronize audio
   useEffect(() => {
     sounds.enabled = soundEnabled;
   }, [soundEnabled]);
 
-  // Read URL params (e.g. ?room=ABCD)
+  // Read URL params (e.g. ?room=ABCD, #room=ABCD, or #ABCD)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    if (roomParam) {
-      setRoomId(roomParam.toUpperCase());
-      setQuickRoomCode(roomParam.toUpperCase());
-      setView('join');
-    }
+    const handleUrlRoom = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        let roomParam = params.get('room');
+        if (!roomParam && window.location.hash) {
+          const hash = window.location.hash.replace(/^#\/?/, '');
+          if (hash.startsWith('room=')) {
+            roomParam = hash.replace('room=', '');
+          } else if (/^[A-Za-z0-9]{4,8}$/.test(hash)) {
+            roomParam = hash;
+          } else {
+            const hashParams = new URLSearchParams(hash.includes('?') ? hash.split('?')[1] : hash);
+            roomParam = hashParams.get('room');
+          }
+        }
+        if (roomParam) {
+          const cleanCode = roomParam.trim().toUpperCase();
+          setRoomId(cleanCode);
+          setQuickRoomCode(cleanCode);
+          setView('join');
+        }
+      } catch {
+        // ignore
+      }
+    };
+    handleUrlRoom();
+    window.addEventListener('popstate', handleUrlRoom);
+    window.addEventListener('hashchange', handleUrlRoom);
+    return () => {
+      window.removeEventListener('popstate', handleUrlRoom);
+      window.removeEventListener('hashchange', handleUrlRoom);
+    };
   }, []);
 
   // Fetch school students on mount & view change
@@ -610,13 +752,9 @@ export default function App() {
 
   const addSimulatedOpponent = async () => {
     if (!roomId) return;
-    const botNames = ['البطل راكان', 'الفارس عمر', 'الذكي زياد', 'النجم فيصل'];
-    const randomBot = botNames[Math.floor(Math.random() * botNames.length)];
     try {
-      await fetch(`/api/rooms/${roomId}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: randomBot })
+      await fetch(`/api/rooms/${roomId}/add-test-student`, {
+        method: 'POST'
       });
       fetchRoom(roomId);
     } catch {
@@ -645,11 +783,12 @@ export default function App() {
       if (data.isCorrect) {
         sounds.playCorrect();
         confetti({ particleCount: 30, spread: 45, origin: { y: 0.7 } });
-        setAnswerResult({ isCorrect: true, points: data.pointsEarned });
+        setAnswerResult({ isCorrect: true, points: data.pointsEarned, correctAnswer: data.correctAnswer });
       } else {
         sounds.playWrong();
-        setAnswerResult({ isCorrect: false, points: 0 });
+        setAnswerResult({ isCorrect: false, points: 0, correctAnswer: data.correctAnswer });
       }
+      fetchRoom(roomId);
     } catch {
       // ignore
     }
@@ -700,14 +839,24 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Admin Portal Entry Button (Direct & Professional) */}
+          {/* Admin Portal Entry Button in the Top Bar */}
           <button
             onClick={() => { sounds.playTap(); setView('admin'); }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold border border-amber-500/30 transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-black border border-amber-500/30 transition-colors shadow-sm"
             title="دخول بوابة الإدارة المدرسية وتحليل الفصول"
           >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>دخول الإدارة</span>
+            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+            <span>بوابة الإدارة المدرسية</span>
+          </button>
+
+          {/* Honor Board Button */}
+          <button
+            onClick={() => { sounds.playTap(); setIsHonorBoardOpen(true); }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 text-xs font-black border border-amber-500/30 transition-colors shadow-sm"
+            title="لوحة الشرف وفرسان الرياضيات"
+          >
+            <Trophy className="w-3.5 h-3.5 text-amber-400" />
+            <span>لوحة الشرف 🏆</span>
           </button>
 
           {/* Active Rooms Badge */}
@@ -739,62 +888,52 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Hub: Clean, Compact, Zero Fluff, 3 Professional Cards */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-4xl mx-auto w-full my-auto space-y-4">
+      {/* Main Hub: Clean, Balanced, 2 Professional Core Cards */}
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-3xl mx-auto w-full my-auto space-y-4">
         {/* Title */}
         <div className="text-center">
           <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-            مسابقة جدول الضرب
+            مسابقة جدول الضرب والحساب الذهني
           </h1>
         </div>
 
-        {/* 3 Core Cards (Compact, Direct Action, Zero Explanations) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
+        {/* 2 Core Cards (Symmetrical, Direct Action, Zero Redundancy) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 w-full">
           {/* Card 1: Classroom Smart Board Mode */}
           <motion.div
             whileHover={{ y: -2, scale: 1.01 }}
-            className="p-3.5 rounded-2xl bg-slate-900 border border-amber-500/30 text-white shadow-xl text-right flex flex-col justify-between space-y-3"
+            className="p-4 rounded-2xl bg-slate-900 border border-amber-500/30 text-white shadow-xl text-right flex flex-col justify-between space-y-3"
           >
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                <Trophy className="w-4 h-4" />
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                <Trophy className="w-5 h-5" />
               </div>
-              <div>
-                <h3 className="text-sm font-black text-white">
-                  مسابقة السبورة الصفية
-                </h3>
-                <span className="text-[10px] text-slate-400 font-bold block">
-                  تناوب فردي للطلاب داخل الصف
-                </span>
-              </div>
+              <h3 className="text-base font-black text-white">
+                مسابقة السبورة الصفية
+              </h3>
             </div>
 
             <button
               onClick={() => { sounds.playTap(); setView('direct_board'); }}
-              className="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition-colors"
+              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition-colors"
             >
-              <span>بدء المسابقة الصفية</span>
-              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>بدء مسابقة السبورة</span>
+              <ChevronLeft className="w-4 h-4" />
             </button>
           </motion.div>
 
           {/* Card 2: Online Multiplayer Challenge */}
           <motion.div
             whileHover={{ y: -2, scale: 1.01 }}
-            className="p-3.5 rounded-2xl bg-slate-900 border border-indigo-500/30 text-white shadow-xl text-right flex flex-col justify-between space-y-2.5"
+            className="p-4 rounded-2xl bg-slate-900 border border-indigo-500/30 text-white shadow-xl text-right flex flex-col justify-between space-y-2.5"
           >
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center shrink-0">
-                <Swords className="w-4 h-4" />
+              <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center shrink-0">
+                <Swords className="w-5 h-5" />
               </div>
-              <div>
-                <h3 className="text-sm font-black text-white">
-                  التحدي الأونلاين
-                </h3>
-                <span className="text-[10px] text-emerald-400 font-bold block">
-                  مفتوح لجميع الأجهزة بدون تسجيل
-                </span>
-              </div>
+              <h3 className="text-base font-black text-white">
+                التحدي الأونلاين
+              </h3>
             </div>
 
             {/* Quick Join Inputs on Card */}
@@ -812,7 +951,7 @@ export default function App() {
                     <button
                       onClick={() => { setPickerTarget('home'); setIsPickerOpen(true); }}
                       className="absolute left-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-amber-400 hover:text-amber-300"
-                      title="اختيار من قائمة المدرسة"
+                      title="قائمة المدرسة"
                     >
                       <GraduationCap className="w-3 h-3" />
                     </button>
@@ -855,35 +994,30 @@ export default function App() {
               </button>
             </div>
           </motion.div>
-
-          {/* Card 3: School Admin & Analytics Portal */}
-          <motion.div
-            whileHover={{ y: -2, scale: 1.01 }}
-            className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-amber-500/40 text-white shadow-xl text-right flex flex-col justify-between space-y-3"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center shrink-0">
-                <ShieldCheck className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white">
-                  بوابة الإدارة المدرسية
-                </h3>
-                <span className="text-[10px] text-slate-400 font-bold block">
-                  إضافة الطلاب • تحليل الفصول • لوحة الشرف
-                </span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => { sounds.playTap(); setView('admin'); }}
-              className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-700 transition-colors"
-            >
-              <span>دخول لوحة التحكم</span>
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-          </motion.div>
         </div>
+
+        {/* Card 3: Solo Practice Blitz */}
+        <motion.div
+          whileHover={{ y: -1 }}
+          className="w-full p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 text-white shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 text-right"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
+              <Flame className="w-5 h-5 text-amber-400" />
+            </div>
+            <h4 className="text-sm font-black text-white">
+              التدريب الفردي السريع (Solo Blitz)
+            </h4>
+          </div>
+
+          <button
+            onClick={() => { sounds.playTap(); setView('solo_practice'); }}
+            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all shrink-0"
+          >
+            <span>بدء التدريب الفردي ⚡</span>
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+        </motion.div>
       </main>
 
       {/* Footer Branding */}
@@ -949,25 +1083,87 @@ export default function App() {
 
             <div className="py-1 flex flex-col items-center gap-1.5">
               <div className="p-2.5 bg-white rounded-xl inline-block shadow-md">
-                <QRCodeCanvas value={joinUrl} size={115} />
+                <QRCodeCanvas value={joinUrl} size={125} />
               </div>
-              <span className="text-[10px] text-slate-400 font-bold">
-                امسح الباركود بالكاميرا للدخول الفوري
+              <span className="text-[10px] text-slate-300 font-bold">
+                امسح الباركود بكاميرا الجوال للدخول الفوري
               </span>
+            </div>
+
+            {/* Direct URL Display & Custom Domain Configuration */}
+            <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 text-right space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
+                <span>رابط الانضمام المشفر في الباركود:</span>
+                <button
+                  type="button"
+                  onClick={() => setShowUrlSettings(!showUrlSettings)}
+                  className="text-amber-400 hover:text-amber-300 text-[10px] underline flex items-center gap-1"
+                >
+                  {showUrlSettings ? 'إخفاء الإعدادات' : 'تخصيص رابط الاستضافة (Vercel)'}
+                </button>
+              </div>
+
+              {showUrlSettings && (
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-700/80 space-y-2 text-right">
+                  <label className="text-[10px] text-slate-300 font-bold block">
+                    إذا قمت برفع المشروع على Vercel أو دومين مدرستك، اكتب الرابط هنا:
+                  </label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="https://riyadh-math.vercel.app"
+                      value={customDeployUrl}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setCustomDeployUrl(val);
+                        setCustomBaseUrl(val);
+                      }}
+                      className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-mono dir-ltr outline-none focus:border-amber-400 text-left"
+                    />
+                    {customDeployUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomDeployUrl('');
+                          setCustomBaseUrl('');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 text-[10px] font-bold"
+                      >
+                        إلغاء
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[9px] text-slate-400 leading-relaxed">
+                    💡 عند النشر على Vercel، سيعمل هذا الرابط والباركود لجميع هواتف الطلاب دون أي تسجيل دخول.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-emerald-400 font-mono truncate select-all dir-ltr text-left flex-1">
+                  {joinUrl}
+                </span>
+                <button
+                  type="button"
+                  onClick={copyRoomLink}
+                  className="shrink-0 p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
+                  title="نسخ الرابط"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             {/* Direct Share Link for Friends & Students */}
             <div className="space-y-1.5 pt-1">
               <button
+                type="button"
                 onClick={copyRoomLink}
-                className="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 transition-colors"
+                className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 transition-colors"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 <span>نسخ الرابط المباشر للطلاب والأصدقاء</span>
               </button>
-              <div className="text-[10px] text-slate-400 font-medium bg-slate-950/70 py-1 px-2 rounded-lg border border-slate-800/80">
-                رابط عام ومباشر يفتح لجميع الهواتف والأجهزة دون أي تسجيل دخول
-              </div>
             </div>
 
             {/* Duel Waiting Status */}
@@ -990,7 +1186,7 @@ export default function App() {
                 className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 mx-auto transition-colors"
               >
                 <Bot className="w-3.5 h-3.5 text-amber-400" />
-                <span>إضافة منافس تجريبي (بدء فوري)</span>
+                <span>إضافة طالب تجريبي</span>
               </button>
             )}
 
@@ -1066,106 +1262,128 @@ export default function App() {
 
     // STUDENT PLAYER VIEW
     const currentStudent = room.students[playerName];
+    const opponentStudent = studentList.find(s => s.name !== playerName) || null;
 
     return (
-      <div className="min-h-screen bg-slate-950 text-white font-sans p-3 flex flex-col justify-between">
-        {/* Top Bar */}
-        <header className="flex items-center justify-between pb-2 border-b border-slate-800">
+      <div className="min-h-screen bg-slate-950 text-white font-sans p-2.5 sm:p-4 flex flex-col justify-between dir-rtl select-none">
+        {/* Top Bar with Both Students & Live Scores */}
+        <header className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 sm:p-3 max-w-lg mx-auto w-full flex items-center justify-between shadow-lg">
+          {/* Current Student (You) */}
           <div className="flex items-center gap-2">
-            <span className="font-black text-sm">{playerName}</span>
-            {currentStudent && currentStudent.streak >= 2 && (
-              <span className="flex items-center gap-1 text-[11px] font-black text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full">
-                <Flame className="w-3 h-3 fill-current" />
-                <span>{toHindi(currentStudent.streak)} متتالية</span>
-              </span>
-            )}
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-black text-xs shrink-0">
+              أنت
+            </div>
+            <div>
+              <span className="font-black text-sm block leading-tight truncate max-w-[110px]">{playerName}</span>
+              <span className="text-xs font-mono font-black text-amber-400">{toHindi(currentStudent?.score || 0)} نقطة</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="text-right">
-              <span className="text-[10px] text-slate-400 block font-bold">النقاط</span>
-              <span className="text-base font-black text-amber-400 font-mono">{toHindi(currentStudent?.score || 0)}</span>
-            </div>
-            <Trophy className="w-4 h-4 text-amber-400" />
+          {/* VS Divider & Question Badge */}
+          <div className="text-center px-2 py-0.5 bg-slate-950 rounded-xl border border-slate-800">
+            <span className="text-[10px] font-black text-indigo-400 block">VS</span>
+            <span className="text-[9px] font-mono font-bold text-slate-400">س{toHindi(room.currentQuestionIndex + 1)}/{toHindi(totalQ)}</span>
           </div>
+
+          {/* Opponent Student */}
+          {opponentStudent ? (
+            <div className="flex items-center gap-2 text-left dir-ltr">
+              <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-black text-xs shrink-0">
+                {opponentStudent.name.includes('تجريبي') ? <Bot className="w-4 h-4" /> : 'منافس'}
+              </div>
+              <div>
+                <span className="font-black text-sm block leading-tight truncate max-w-[110px]">{opponentStudent.name}</span>
+                <span className="text-xs font-mono font-black text-indigo-300">{toHindi(opponentStudent.score)} نقطة</span>
+              </div>
+            </div>
+          ) : (
+            <span className="text-[10px] text-slate-500 font-bold">بانتظار المنافس...</span>
+          )}
         </header>
 
         {/* Content Area */}
         <main className="flex-1 flex flex-col items-center justify-center my-2 max-w-lg mx-auto w-full space-y-3">
-          <div className="w-full bg-slate-900 border border-slate-800 p-4 sm:p-6 rounded-2xl md:rounded-3xl shadow-xl text-center space-y-4">
-            {isIntermission ? (
-              <div className="py-6 space-y-3">
-                <div className="text-base font-black text-white">
-                  {answerResult?.isCorrect ? 'أحسنت! إجابة صحيحة 🌟' : 'إجابة خاطئة! ركز في القادم'}
+          <div className="w-full bg-slate-900 border border-slate-800 p-4 sm:p-6 rounded-3xl shadow-xl text-center space-y-3">
+            {/* Question Counter & Timer */}
+            <div className="flex items-center justify-between pb-1 border-b border-slate-800/80">
+              <span className="text-xs font-bold text-slate-400 bg-slate-800/80 px-2.5 py-0.5 rounded-full">
+                السؤال {toHindi(room.currentQuestionIndex + 1)} من {toHindi(totalQ)}
+              </span>
+
+              <div className={`flex items-center gap-1 font-black text-sm font-mono ${timeLeft <= 3 ? 'text-red-400 animate-pulse' : 'text-amber-400'}`}>
+                <Timer className="w-3.5 h-3.5" />
+                <span>{toHindi(timeLeft)} ث</span>
+              </div>
+            </div>
+
+            {/* Math Equation */}
+            <div className="py-2 select-none font-mono">
+              <div className="text-4xl sm:text-5xl md:text-6xl font-black text-white tracking-wider flex items-center justify-center gap-2.5">
+                <span>{toHindi(currentQ.a)}</span>
+                <span className="text-amber-400">{currentQ.operation}</span>
+                <span>{toHindi(currentQ.b)}</span>
+                <span className="text-slate-600">=</span>
+                <span className="text-indigo-400">؟</span>
+              </div>
+            </div>
+
+            {/* Answer Correction & 3-Second Countdown Display */}
+            {hasAnsweredCurrent && (
+              <div className="space-y-2 py-1">
+                <div className={`p-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-sm ${
+                  answerResult?.isCorrect
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                }`}>
+                  {answerResult?.isCorrect ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <XCircle className="w-4 h-4 text-red-400 shrink-0" />}
+                  <span>
+                    {answerResult?.isCorrect
+                      ? `أحسنت! إجابة صحيحة (+${toHindi(answerResult.points)} نقطة) 🌟`
+                      : `إجابة خاطئة! الجواب الصحيح: ${toHindi(answerResult?.correctAnswer ?? currentQ.answer)}`}
+                  </span>
                 </div>
-                <div className="text-[11px] text-slate-400 font-bold">
-                  السؤال القادم يبدأ خلال:
-                </div>
-                <div className="text-5xl font-black text-amber-400 font-mono animate-ping">
-                  {toHindi(intermissionSecs)}
+
+                {/* 3-Second Transition Countdown */}
+                <div className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-center gap-2">
+                  <span className="text-xs text-slate-400 font-bold">الانتقال للسؤال التالي خلال:</span>
+                  <span className="text-xl font-black text-amber-400 font-mono animate-pulse">
+                    {toHindi(isIntermission ? intermissionSecs : 3)}
+                  </span>
                 </div>
               </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400 bg-slate-800 px-2.5 py-0.5 rounded-full">
-                    السؤال {toHindi(room.currentQuestionIndex + 1)} من {toHindi(totalQ)}
-                  </span>
-
-                  <div className={`flex items-center gap-1 font-black text-base font-mono ${timeLeft <= 3 ? 'text-red-400 animate-pulse' : 'text-amber-400'}`}>
-                    <Timer className="w-3.5 h-3.5" />
-                    <span>{toHindi(timeLeft)} ث</span>
-                  </div>
-                </div>
-
-                {/* Question */}
-                <div className="py-2 select-none font-mono">
-                  <div className="text-4xl sm:text-5xl md:text-6xl font-black text-white tracking-wider flex items-center justify-center gap-2.5">
-                    <span>{toHindi(currentQ.a)}</span>
-                    <span className="text-amber-400">{currentQ.operation}</span>
-                    <span>{toHindi(currentQ.b)}</span>
-                    <span className="text-slate-600">=</span>
-                    <span className="text-indigo-400">؟</span>
-                  </div>
-                </div>
-
-                {hasAnsweredCurrent && (
-                  <div className={`p-2 rounded-lg font-black text-xs flex items-center justify-center gap-1.5 ${
-                    answerResult?.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                  }`}>
-                    {answerResult?.isCorrect ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                    <span>{answerResult?.isCorrect ? `إجابة صحيحة (+${toHindi(answerResult.points)})` : 'إجابة خاطئة!'}</span>
-                  </div>
-                )}
-
-                {/* All 4 Options Visible Simultaneously */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
-                  {currentQ.options.map((opt, i) => {
-                    const isChosen = selectedOption === opt;
-                    let style = 'bg-slate-800 border-slate-700 text-white hover:bg-slate-700';
-
-                    if (hasAnsweredCurrent) {
-                      if (isChosen) {
-                        style = answerResult?.isCorrect ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-red-600 border-red-400 text-white';
-                      } else {
-                        style = 'bg-slate-800/40 border-slate-800 text-slate-500 opacity-40';
-                      }
-                    }
-
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => submitAnswer(opt)}
-                        disabled={hasAnsweredCurrent}
-                        className={`py-3 px-2 rounded-xl font-black text-xl sm:text-2xl border transition-all shadow-sm font-mono active:scale-95 flex items-center justify-center ${style}`}
-                      >
-                        {toHindi(opt)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
             )}
+
+            {/* All 4 Options Visible Simultaneously */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full pt-1">
+              {currentQ.options.map((opt, i) => {
+                const isChosen = selectedOption === opt;
+                const isActualCorrect = opt === currentQ.answer;
+                let style = 'bg-slate-800 border-slate-700 text-white hover:bg-slate-700';
+
+                if (hasAnsweredCurrent) {
+                  if (isChosen) {
+                    style = answerResult?.isCorrect
+                      ? 'bg-emerald-600 border-emerald-400 text-white ring-2 ring-emerald-400/50'
+                      : 'bg-red-600 border-red-400 text-white ring-2 ring-red-400/50';
+                  } else if (!answerResult?.isCorrect && isActualCorrect) {
+                    style = 'bg-emerald-600/30 border-emerald-500 text-emerald-300 ring-2 ring-emerald-500/40 animate-pulse';
+                  } else {
+                    style = 'bg-slate-800/40 border-slate-800 text-slate-500 opacity-40';
+                  }
+                }
+
+                return (
+                  <button
+                    key={i}
+                    onClick={() => submitAnswer(opt)}
+                    disabled={hasAnsweredCurrent}
+                    className={`py-3 px-2 rounded-xl font-black text-xl sm:text-2xl border transition-all shadow-sm font-mono active:scale-95 flex items-center justify-center ${style}`}
+                  >
+                    {toHindi(opt)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </main>
       </div>
@@ -1202,49 +1420,73 @@ export default function App() {
 
         <main className="flex-1 my-4 max-w-2xl mx-auto w-full space-y-3">
           <div className="space-y-2">
-            {studentList.map((s, idx) => (
-              <div
-                key={s.name}
-                className={`p-3 rounded-xl border flex items-center justify-between ${
-                  idx === 0
-                    ? 'bg-amber-500/15 border-amber-400 text-amber-300 shadow-sm'
-                    : 'bg-slate-900 border-slate-800 text-slate-300'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="w-7 h-7 rounded-lg font-mono font-black text-xs flex items-center justify-center bg-slate-800">
-                    {idx === 0 ? '🥇' : idx === 1 ? '🥈' : toHindi(idx + 1)}
-                  </span>
-                  <div>
-                    <span className="font-bold text-sm block text-white">{s.name}</span>
-                    <span className="text-[10px] text-slate-400 font-bold">
-                      {toHindi(s.correctCount)} صحيحة من {toHindi(room?.config.questionsCount || 10)}
+            {studentList.map((s, idx) => {
+              const totalQ = room?.config.questionsCount || 10;
+              const pct = totalQ > 0 ? Math.round((s.score / totalQ) * 100) : 0;
+              const isWinner = idx === 0;
+
+              return (
+                <div
+                  key={s.name}
+                  className={`p-3.5 rounded-2xl border flex items-center justify-between ${
+                    isWinner
+                      ? 'bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-amber-500/20 border-amber-400 text-amber-300 shadow-md ring-1 ring-amber-400/30'
+                      : 'bg-slate-900 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-8 h-8 rounded-xl font-mono font-black text-sm flex items-center justify-center bg-slate-800">
+                      {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : toHindi(idx + 1)}
                     </span>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-sm text-white">{s.name}</span>
+                        {isWinner && (
+                          <span className="text-[10px] font-black bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded-md">
+                            بطل المسابقة 👑
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-bold block font-mono">
+                        {toHindi(s.correctCount)} صحيحة من {toHindi(totalQ)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="text-left font-mono">
+                      <span className="text-base font-black text-amber-400 block">{toHindi(s.score)} درجات</span>
+                      <span className="text-xs font-black text-emerald-400">({toHindi(pct)}٪)</span>
+                    </div>
+
+                    {/* Certificate Button EXCLUSIVELY for 1st Place Winner */}
+                    {isWinner ? (
+                      <button
+                        onClick={() => {
+                          sounds.playTap();
+                          setCertData({
+                            isOpen: true,
+                            studentName: s.name,
+                            score: s.score,
+                            correctCount: s.correctCount,
+                            total: totalQ,
+                            rank: 1
+                          });
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all hover:scale-105"
+                      >
+                        <Award className="w-4 h-4 fill-current" />
+                        <span>شهادة الفائز 🏆</span>
+                      </button>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-500 px-2">
+                        {idx === 1 ? 'المركز الثاني' : idx === 2 ? 'المركز الثالث' : `المركز ${toHindi(idx + 1)}`}
+                      </span>
+                    )}
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2.5">
-                  <span className="text-lg font-black text-amber-400 font-mono">{toHindi(s.score)}</span>
-                  <button
-                    onClick={() => {
-                      sounds.playTap();
-                      setCertData({
-                        isOpen: true,
-                        studentName: s.name,
-                        score: s.score,
-                        correctCount: s.correctCount,
-                        total: room?.config.questionsCount || 10,
-                        rank: idx + 1
-                      });
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-400/30 text-xs font-bold flex items-center gap-1"
-                  >
-                    <Award className="w-3 h-3" />
-                    <span>شهادة</span>
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </main>
       </div>
@@ -1267,6 +1509,7 @@ export default function App() {
           initialName={playerName}
           onJoin={handleJoinRoom}
           onBack={() => setView('home')}
+          schoolStudents={schoolStudents}
           onOpenPicker={() => {
             setPickerTarget('join');
             setIsPickerOpen(true);
@@ -1302,6 +1545,11 @@ export default function App() {
               total
             });
           }}
+        />
+      )}
+      {view === 'solo_practice' && (
+        <SoloPracticeGame
+          onBack={() => setView('home')}
         />
       )}
 
@@ -1369,6 +1617,13 @@ export default function App() {
         teacherName="أ/ أسامة إبراهيم"
         title="تحدي جدول الضرب"
         rank={certData.rank}
+      />
+
+      {/* Honor Board Modal */}
+      <HonorBoardModal
+        isOpen={isHonorBoardOpen}
+        onClose={() => setIsHonorBoardOpen(false)}
+        students={schoolStudents}
       />
     </div>
   );

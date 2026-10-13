@@ -2,15 +2,15 @@
  * Teacher Live Game Dashboard Component
  * Riyadh Al-Ebdaa Schools
  * Ultra-interactive real-time monitoring screen for teachers during online competitions:
- * - Shows each student's score, rank, correct answers count, and wrong answers count
- * - Live question breakdown with options distribution & student picks
- * - Smartboard projection mode (hide picks to prevent classroom copying)
- * - Interactive classroom response matrix (Question vs Student grid)
- * - Clickable individual student answer inspector
- * - Teacher controls: Next Question skip, encouragement cheers, fullscreen, end room
+ * - Direct side-by-side display of both students and their live scores
+ * - 3-second intermission countdown with immediate answer correction
+ * - Full suite of professional teacher controls (Next, Prev, Repeat, Reveal Answer, Cheer)
+ * - Prominent QR Code modal with instant 1-click "Return to Questions"
+ * - Instant "Add Test Student" (named "تجريبي" only)
+ * - Zero clutter and concise, professional layout
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Trophy,
@@ -20,6 +20,9 @@ import {
   Eye,
   EyeOff,
   SkipForward,
+  SkipBack,
+  RotateCcw,
+  Lightbulb,
   Table2,
   Users,
   Maximize2,
@@ -29,13 +32,18 @@ import {
   Sparkles,
   Search,
   X,
-  Clock,
   Radio,
   Share2,
   Copy,
-  Check
+  Check,
+  QrCode,
+  Bot,
+  Swords,
+  ChevronRight,
+  ChevronLeft
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { QRCodeCanvas } from 'qrcode.react';
 import { toHindi } from '../utils/format';
 import { sounds } from '../utils/audio';
 import { RiyadhEbdaaLogo } from './RiyadhEbdaaLogo';
@@ -60,16 +68,6 @@ export interface Student {
   completed: boolean;
 }
 
-export interface Question {
-  id: number;
-  a: number;
-  b: number;
-  operation: '×' | '÷';
-  answer: number;
-  options: number[];
-  text: string;
-}
-
 export interface Room {
   id: string;
   title: string;
@@ -81,7 +79,14 @@ export interface Room {
     timePerQuestion: number;
     mode: 'multi' | 'divi' | 'mixed';
   };
-  questions: Question[];
+  questions: Array<{
+    id: string | number;
+    a: number;
+    b: number;
+    operation: '×' | '÷';
+    answer: number;
+    options: number[];
+  }>;
   currentQuestionIndex: number;
   questionStartedAt: number;
   intermissionEndsAt: number;
@@ -93,7 +98,7 @@ interface TeacherLiveGameDashboardProps {
   room: Room;
   roomId: string;
   isFullscreen: boolean;
-  setIsFullscreen: (v: boolean) => void;
+  setIsFullscreen: (full: boolean) => void;
   activeRoomsCount: number;
   onOpenActiveRooms: () => void;
   onEndGame: () => void;
@@ -118,14 +123,34 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudentForInspect, setSelectedStudentForInspect] = useState<Student | null>(null);
   const [hideStudentPicksOnBoard, setHideStudentPicksOnBoard] = useState(false);
+  const [revealAnswer, setRevealAnswer] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [isSkipping, setIsSkipping] = useState(false);
+  const [isAddingBot, setIsAddingBot] = useState(false);
+
+  // Close modals on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowQrModal(false);
+        setSelectedStudentForInspect(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const currentQ = room.questions[room.currentQuestionIndex];
   const totalQ = room.questions.length;
   const isIntermission = room.status === 'intermission';
   const now = Date.now();
   const intermissionSecs = Math.max(1, Math.ceil((room.intermissionEndsAt - now) / 1000));
+
+  // Reset reveal answer toggle on new question
+  useEffect(() => {
+    setRevealAnswer(false);
+  }, [room.currentQuestionIndex]);
 
   // All students sorted by score descending
   const sortedStudents = useMemo(() => {
@@ -134,6 +159,10 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
       return b.correctCount - a.correctCount;
     });
   }, [room.students]);
+
+  // Two primary students (for head-to-head match)
+  const student1 = sortedStudents[0] || null;
+  const student2 = sortedStudents[1] || null;
 
   // Statistics for current question
   const currentQStats = useMemo(() => {
@@ -185,15 +214,15 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     });
   }, [sortedStudents, filter, searchQuery, room.currentQuestionIndex]);
 
-  // Teacher manual advance to next question
+  // Next Question
   const handleNextQuestion = async () => {
     if (isSkipping) return;
     setIsSkipping(true);
     sounds.playTap();
     try {
       const res = await fetch(`/api/rooms/${roomId}/next`, { method: 'POST' });
-      if (res.ok) {
-        if (showToast) showToast('تم الانتقال للسؤال التالي بنجاح');
+      if (res.ok && showToast) {
+        showToast('تم الانتقال للسؤال التالي');
       }
     } catch {
       // ignore
@@ -202,7 +231,50 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     }
   };
 
-  // Cheer / Applause button for classroom excitement
+  // Previous Question
+  const handlePrevQuestion = async () => {
+    sounds.playTap();
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/prev`, { method: 'POST' });
+      if (res.ok && showToast) {
+        showToast('تم الرجوع للسؤال السابق');
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Repeat current question
+  const handleRepeatQuestion = async () => {
+    sounds.playTap();
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/repeat`, { method: 'POST' });
+      if (res.ok && showToast) {
+        showToast('تمت إعادة تشغيل السؤال الحالي وتصفير الإجابات');
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Add test student (Named "تجريبي" only)
+  const handleAddTestStudent = async () => {
+    if (isAddingBot) return;
+    setIsAddingBot(true);
+    sounds.playTap();
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/add-test-student`, { method: 'POST' });
+      if (res.ok && showToast) {
+        showToast('تمت إضافة طالب تجريبي بنجاح');
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsAddingBot(false);
+    }
+  };
+
+  // Cheer & Confetti
   const handleTeacherCheer = () => {
     sounds.playCorrect();
     sounds.playFanfare();
@@ -221,100 +293,146 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     if (ok) {
       setCopiedLink(true);
       sounds.playTap();
-      if (showToast) showToast('تم نسخ الرابط العام للغرفة');
+      if (showToast) showToast('تم نسخ رابط الغرفة المباشر');
       setTimeout(() => setCopiedLink(false), 2000);
     }
   };
 
+  const getStudentAnswerForCurrentQ = (student: Student | null) => {
+    if (!student) return null;
+    return student.answers.find(a => a.questionIndex === room.currentQuestionIndex) || null;
+  };
+
   return (
-    <div className={`min-h-screen ${isFullscreen ? 'bg-black' : 'bg-slate-950'} text-white font-sans p-3 sm:p-5 flex flex-col justify-between dir-rtl select-none`}>
+    <div className={`min-h-screen ${isFullscreen ? 'bg-black' : 'bg-slate-950'} text-white font-sans p-2 sm:p-4 flex flex-col justify-between dir-rtl select-none`}>
       {/* ------------------------------------------------------------- */}
-      {/* 1. TOP TEACHER COMMAND BAR                                    */}
+      {/* 1. PROFESSIONAL TEACHER COMMAND BAR                            */}
       {/* ------------------------------------------------------------- */}
-      <header className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800 max-w-7xl mx-auto w-full">
+      <header className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 sm:p-3 max-w-7xl mx-auto w-full flex flex-wrap items-center justify-between gap-2.5 shadow-lg">
         {/* Brand & Room Info */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <RiyadhEbdaaLogo size="xs" />
           <div>
             <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs font-black text-amber-400 bg-amber-400/10 px-2.5 py-0.5 rounded-full border border-amber-400/20">
-                <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
-                <span>بث شاشة المعلم المباشرة</span>
+              <span className="flex items-center gap-1 text-[11px] font-black text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
+                <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
+                <span>شاشة المعلم المباشرة</span>
               </span>
-              <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-800">
-                رمز الغرفة: <span className="text-amber-400 font-black">{roomId}</span>
+              <span className="text-[11px] font-mono font-bold text-slate-300 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">
+                الغرفة: <span className="text-amber-400 font-black">{roomId}</span>
               </span>
             </div>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-sm font-black text-white">{room.title || 'المسابقة الرياضية'}</span>
-              <span className="text-[11px] text-emerald-400 font-bold">
-                • {toHindi(sortedStudents.length)} طلاب متصلين
+              <span className="text-xs font-black text-white">{room.title || 'مسابقة جدول الضرب'}</span>
+              <span className="text-[10px] text-emerald-400 font-bold">
+                • {toHindi(sortedStudents.length)} طلاب
               </span>
             </div>
           </div>
         </div>
 
-        {/* Question Counter & Teacher Action Controls */}
-        <div className="flex items-center flex-wrap gap-2">
-          {/* View Mode Toggle: Cards vs Matrix */}
-          <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl">
-            <button
-              onClick={() => { sounds.playTap(); setViewMode('cards'); }}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors ${
-                viewMode === 'cards' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>بطاقات الطلاب</span>
-            </button>
-            <button
-              onClick={() => { sounds.playTap(); setViewMode('matrix'); }}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors ${
-                viewMode === 'matrix' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Table2 className="w-3.5 h-3.5" />
-              <span>مصفوفة الإجابات الكاملة</span>
-            </button>
-          </div>
+        {/* Action Controls */}
+        <div className="flex items-center flex-wrap gap-1.5">
+          {/* Barcode Button */}
+          <button
+            onClick={() => {
+              sounds.playTap();
+              setShowQrModal(true);
+            }}
+            className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-black flex items-center gap-1.5 transition-all shadow-sm"
+            title="فتح باركود الغرفة للطلاب"
+          >
+            <QrCode className="w-4 h-4 text-amber-400" />
+            <span>عرض الباركود</span>
+          </button>
 
-          {/* Hide/Show student picks on Smartboard toggle */}
+          {/* Add Test Student */}
+          <button
+            onClick={handleAddTestStudent}
+            disabled={isAddingBot}
+            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all"
+            title="إضافة طالب تجريبي بدون الذكي"
+          >
+            <Bot className="w-3.5 h-3.5 text-indigo-400" />
+            <span>+ طالب تجريبي</span>
+          </button>
+
+          {/* Reveal Correct Answer Toggle */}
+          <button
+            onClick={() => {
+              sounds.playTap();
+              setRevealAnswer(prev => !prev);
+              if (showToast) {
+                showToast(!revealAnswer ? 'تم كشف الإجابة الصحيحة' : 'تم إخفاء الإجابة');
+              }
+            }}
+            className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1 transition-all ${
+              revealAnswer
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-black'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+            }`}
+            title="كشف الإجابة الصحيحة على الشاشة"
+          >
+            <Lightbulb className={`w-3.5 h-3.5 ${revealAnswer ? 'text-emerald-400 fill-emerald-400' : 'text-slate-400'}`} />
+            <span>{revealAnswer ? 'الإجابة مكشوفة' : 'كشف الإجابة'}</span>
+          </button>
+
+          {/* Hide Student Picks on Smartboard */}
           <button
             onClick={() => {
               sounds.playTap();
               setHideStudentPicksOnBoard(prev => !prev);
               if (showToast) {
-                showToast(!hideStudentPicksOnBoard ? 'تم إخفاء خيارات الطلاب (وضع العرض للسبورة)' : 'تم إظهار خيارات الطلاب للمعلم');
+                showToast(!hideStudentPicksOnBoard ? 'تم إخفاء اختيارات الطلاب لمنع الغش' : 'تم إظهار الاختيارات');
               }
             }}
-            title={hideStudentPicksOnBoard ? 'إظهار خيارات الطلاب' : 'إخفاء خيارات الطلاب على الشاشة لمنع الغش'}
-            className={`p-1.5 rounded-xl border text-xs font-bold flex items-center gap-1 transition-colors ${
+            className={`p-1.5 rounded-xl border text-xs font-bold transition-all ${
               hideStudentPicksOnBoard
                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                 : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
             }`}
+            title={hideStudentPicksOnBoard ? 'إظهار اختيارات الطلاب' : 'إخفاء الاختيارات لمنع الغش'}
           >
             {hideStudentPicksOnBoard ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            <span className="hidden sm:inline">{hideStudentPicksOnBoard ? 'خيارات الطلاب مخفية' : 'إخفاء الخيارات للسبورة'}</span>
           </button>
 
-          {/* Teacher Cheer & Confetti */}
+          {/* Repeat Current Question */}
           <button
-            onClick={handleTeacherCheer}
-            className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center gap-1 transition-colors shadow-sm"
+            onClick={handleRepeatQuestion}
+            className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+            title="إعادة السؤال الحالي وتصفير الإجابات"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">تشجيع</span>
+            <RotateCcw className="w-4 h-4" />
           </button>
 
-          {/* Skip / Next Question */}
+          {/* Previous Question */}
+          <button
+            onClick={handlePrevQuestion}
+            disabled={room.currentQuestionIndex === 0}
+            className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-30 text-slate-300 border border-slate-800"
+            title="السؤال السابق"
+          >
+            <SkipBack className="w-4 h-4" />
+          </button>
+
+          {/* Next Question */}
           <button
             onClick={handleNextQuestion}
             disabled={isSkipping}
-            className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all"
+            className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-black flex items-center gap-1 shadow-md shadow-indigo-600/20 transition-all"
+            title="الانتقال للسؤال التالي"
           >
             <SkipForward className="w-3.5 h-3.5" />
             <span>السؤال التالي</span>
+          </button>
+
+          {/* Teacher Cheer */}
+          <button
+            onClick={handleTeacherCheer}
+            className="p-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30"
+            title="تشجيع وتصفيق احتفالي"
+          >
+            <Sparkles className="w-4 h-4" />
           </button>
 
           {/* Copy link */}
@@ -324,14 +442,6 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
             title="نسخ رابط الانضمام"
           >
             {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
-          </button>
-
-          {/* Active rooms */}
-          <button
-            onClick={onOpenActiveRooms}
-            className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold"
-          >
-            الغرف ({toHindi(activeRoomsCount)})
           </button>
 
           {/* Fullscreen */}
@@ -347,6 +457,7 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
           <button
             onClick={onEndGame}
             className="px-2.5 py-1.5 rounded-xl bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 text-xs font-black flex items-center gap-1"
+            title="إنهاء المسابقة"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>إنهاء</span>
@@ -355,69 +466,225 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
       </header>
 
       {/* ------------------------------------------------------------- */}
-      {/* 2. MAIN TEACHER STAGE: QUESTION & OPTIONS BREAKDOWN          */}
+      {/* 2. LIVE TWO-STUDENT HEAD-TO-HEAD MATCHUP & LIVE SCORES        */}
       {/* ------------------------------------------------------------- */}
-      <main className="flex-1 my-3 max-w-7xl mx-auto w-full flex flex-col space-y-4">
-        {/* Question Header & Live Answer Progress Pill */}
-        <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-6 rounded-3xl shadow-xl relative overflow-hidden">
-          {/* Question Number & Real-time Answering Gauge */}
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+      <section className="my-2 max-w-7xl mx-auto w-full">
+        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-xl">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-black text-indigo-300 bg-indigo-500/15 px-3 py-1 rounded-xl border border-indigo-500/20">
+              <Swords className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-black text-white">المواجهة المباشرة بين الطلاب والدرجات المحدثة</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Cards vs Matrix View toggle */}
+              <button
+                onClick={() => setViewMode(viewMode === 'cards' ? 'matrix' : 'cards')}
+                className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1"
+              >
+                {viewMode === 'cards' ? <Table2 className="w-3.5 h-3.5" /> : <Users className="w-3.5 h-3.5" />}
+                <span>{viewMode === 'cards' ? 'عرض مصفوفة الإجابات' : 'عرض بطاقات المتسابقين'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Side-by-Side Dual Student Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
+            {/* Student 1 Card */}
+            {student1 ? (
+              <div className="p-3 sm:p-4 rounded-xl bg-gradient-to-br from-slate-950 to-slate-900 border border-amber-500/30 shadow-md relative overflow-hidden flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-black text-sm">
+                      {student1.name === 'تجريبي' ? <Bot className="w-5 h-5 text-indigo-400" /> : <Trophy className="w-5 h-5 text-amber-400" />}
+                    </div>
+                    <div>
+                      <span className="font-black text-base text-white block">{student1.name}</span>
+                      <span className="text-[10px] text-slate-400 font-bold">
+                        صحيح: {toHindi(student1.correctCount)} | خطأ: {toHindi(student1.answers.filter(a => !a.isCorrect).length)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Big Live Score with Percentage */}
+                  <div className="text-left font-mono">
+                    <span className="text-2xl sm:text-3xl font-black text-amber-400 tracking-tight block">
+                      {toHindi(student1.score)} درجات
+                    </span>
+                    <span className="text-xs font-black text-emerald-400 block -mt-0.5">
+                      ({toHindi(totalQ > 0 ? Math.round((student1.score / totalQ) * 100) : 0)}٪)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Live Answer Status for Current Question */}
+                <div className="mt-2.5 pt-2 border-t border-slate-800/80">
+                  {(() => {
+                    const ans = getStudentAnswerForCurrentQ(student1);
+                    if (ans) {
+                      return (
+                        <div className={`p-2 rounded-xl text-xs font-black flex items-center justify-between ${
+                          ans.isCorrect
+                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-red-500/15 text-red-300 border border-red-500/30'
+                        }`}>
+                          <div className="flex items-center gap-1.5">
+                            {ans.isCorrect ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-red-400" />}
+                            <span>
+                              {ans.isCorrect
+                                ? `أجاب إجابة صحيحة (+${toHindi(ans.pointsEarned)} نقطة)`
+                                : `أجاب إجابة خاطئة (اختار: ${toHindi(ans.selectedOption)})`}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {toHindi(ans.timeSpent.toFixed(1))}ث
+                          </span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="p-2 rounded-xl bg-slate-950/80 text-amber-400 border border-amber-500/20 text-xs font-bold flex items-center justify-center gap-1.5">
+                        <Timer className="w-4 h-4 animate-spin text-amber-400" />
+                        <span>يفكّر في الإجابة الآن...</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-dashed border-slate-800 flex items-center justify-center text-slate-400 text-xs font-bold">
+                في انتظار انضمام الطالب الأول...
+              </div>
+            )}
+
+            {/* Student 2 Card */}
+            {student2 ? (
+              <div className="p-3 sm:p-4 rounded-xl bg-gradient-to-br from-slate-950 to-slate-900 border border-indigo-500/30 shadow-md relative overflow-hidden flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 font-black text-sm">
+                      {student2.name === 'تجريبي' ? <Bot className="w-5 h-5 text-indigo-400" /> : <Trophy className="w-5 h-5 text-indigo-400" />}
+                    </div>
+                    <div>
+                      <span className="font-black text-base text-white block">{student2.name}</span>
+                      <span className="text-[10px] text-slate-400 font-bold">
+                        صحيح: {toHindi(student2.correctCount)} | خطأ: {toHindi(student2.answers.filter(a => !a.isCorrect).length)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Big Live Score with Percentage */}
+                  <div className="text-left font-mono">
+                    <span className="text-2xl sm:text-3xl font-black text-indigo-300 tracking-tight block">
+                      {toHindi(student2.score)} درجات
+                    </span>
+                    <span className="text-xs font-black text-emerald-400 block -mt-0.5">
+                      ({toHindi(totalQ > 0 ? Math.round((student2.score / totalQ) * 100) : 0)}٪)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Live Answer Status for Current Question */}
+                <div className="mt-2.5 pt-2 border-t border-slate-800/80">
+                  {(() => {
+                    const ans = getStudentAnswerForCurrentQ(student2);
+                    if (ans) {
+                      return (
+                        <div className={`p-2 rounded-xl text-xs font-black flex items-center justify-between ${
+                          ans.isCorrect
+                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-red-500/15 text-red-300 border border-red-500/30'
+                        }`}>
+                          <div className="flex items-center gap-1.5">
+                            {ans.isCorrect ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-red-400" />}
+                            <span>
+                              {ans.isCorrect
+                                ? `أجاب إجابة صحيحة (+${toHindi(ans.pointsEarned)} نقطة)`
+                                : `أجاب إجابة خاطئة (اختار: ${toHindi(ans.selectedOption)})`}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {toHindi(ans.timeSpent.toFixed(1))}ث
+                          </span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="p-2 rounded-xl bg-slate-950/80 text-amber-400 border border-amber-500/20 text-xs font-bold flex items-center justify-center gap-1.5">
+                        <Timer className="w-4 h-4 animate-spin text-amber-400" />
+                        <span>يفكّر في الإجابة الآن...</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-dashed border-indigo-500/30 flex flex-col items-center justify-center gap-2 text-center">
+                <span className="text-xs text-slate-400 font-bold">لا يوجد منافس ثانٍ حالياً</span>
+                <button
+                  onClick={handleAddTestStudent}
+                  disabled={isAddingBot}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all"
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>إضافة طالب تجريبي لبدء المنافسة فوراً</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 3. MAIN QUESTION ARENA & OPTIONS DISTRIBUTION                */}
+      {/* ------------------------------------------------------------- */}
+      <main className="flex-1 my-2 max-w-7xl mx-auto w-full flex flex-col space-y-3">
+        <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-3xl shadow-xl text-center space-y-3 relative overflow-hidden">
+          {/* Header of Question */}
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800/80 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="font-black text-indigo-300 bg-indigo-500/15 px-3 py-1 rounded-xl border border-indigo-500/20">
                 السؤال {toHindi(room.currentQuestionIndex + 1)} من {toHindi(totalQ)}
               </span>
-              <span className="text-xs font-bold text-slate-400">
+              <span className="text-slate-400 font-bold">
                 {currentQ?.operation === '×' ? 'جدول الضرب' : 'عمليات القسمة'}
               </span>
             </div>
 
-            {/* Answered counter indicator */}
-            <div className="flex items-center gap-2 bg-slate-950/80 px-3 py-1 rounded-xl border border-slate-800">
+            {/* Answered progress */}
+            <div className="flex items-center gap-2 bg-slate-950 px-3 py-1 rounded-xl border border-slate-800">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-black text-slate-200">
-                أجاب {toHindi(currentQStats.answeredCount)} من {toHindi(currentQStats.totalStudents)} طلاب
+              <span className="font-black text-slate-300">
+                أجاب {toHindi(currentQStats.answeredCount)} من {toHindi(currentQStats.totalStudents)}
               </span>
-              <div className="w-16 h-2 bg-slate-800 rounded-full overflow-hidden mr-1">
-                <div
-                  className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-300"
-                  style={{
-                    width: `${currentQStats.totalStudents > 0 ? (currentQStats.answeredCount / currentQStats.totalStudents) * 100 : 0}%`
-                  }}
-                />
-              </div>
             </div>
           </div>
 
-          {/* Intermission Screen vs Question Screen */}
+          {/* Intermission Screen vs Active Question */}
           {isIntermission ? (
-            <div className="py-6 text-center space-y-3">
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="inline-block px-4 py-1.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-sm font-black"
-              >
-                ✓ تم احتساب إجابات جميع الطلاب! الإجابة الصحيحة هي: {toHindi(currentQ.answer)}
-              </motion.div>
+            <div className="py-4 space-y-3">
+              <div className="inline-block px-4 py-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-base font-black">
+                ✓ اكتملت إجابات السؤال! الإجابة الصحيحة: {toHindi(currentQ.answer)}
+              </div>
 
               <div className="text-xs text-slate-400 font-bold">
-                السؤال القادم يبدأ تلقائياً خلال:
+                الانتقال للسؤال التالي تلقائياً خلال:
               </div>
               <div className="text-6xl font-black text-amber-400 font-mono tracking-widest animate-pulse">
                 {toHindi(intermissionSecs)}
               </div>
 
-              {/* Accuracy of current question */}
-              <div className="flex items-center justify-center gap-4 text-xs font-black pt-2">
-                <span className="text-emerald-400">
-                  الإجابات الصحيحة: {toHindi(currentQStats.correctCount)} ({toHindi(currentQStats.totalStudents > 0 ? Math.round((currentQStats.correctCount / currentQStats.totalStudents) * 100) : 0)}٪)
-                </span>
-                <span className="text-red-400">
-                  الإجابات الخاطئة: {toHindi(currentQStats.wrongCount)}
-                </span>
+              <div>
+                <button
+                  onClick={handleNextQuestion}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
+                >
+                  <SkipForward className="w-3.5 h-3.5" />
+                  <span>الانتقال فوراً الآن</span>
+                </button>
               </div>
             </div>
           ) : (
-            <div className="py-2 text-center space-y-4">
+            <div className="py-1 space-y-4">
               {/* Math Equation */}
               <div className="py-1 select-none font-mono">
                 <div className="text-5xl sm:text-6xl md:text-7xl font-black text-white tracking-widest flex items-center justify-center gap-3 sm:gap-5">
@@ -429,52 +696,58 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
                 </div>
               </div>
 
-              {/* 4 Interactive Options Side-by-Side with Live Student Distribution */}
+              {/* 4 Options Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-w-4xl mx-auto w-full pt-1">
                 {currentQ.options.map((opt, i) => {
                   const studentPicks = currentQStats.optionPicks[opt] || [];
                   const isCorrectAnswer = opt === currentQ.answer;
+                  const isRevealed = revealAnswer;
 
                   return (
                     <div
                       key={i}
-                      className={`p-3 rounded-2xl border transition-all text-center flex flex-col justify-between min-h-[90px] ${
-                        isIntermission
-                          ? isCorrectAnswer
-                            ? 'bg-emerald-600/30 border-emerald-400 text-emerald-200 shadow-lg shadow-emerald-500/20'
-                            : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
-                          : studentPicks.length > 0
-                          ? 'bg-slate-800 border-indigo-500/50 shadow-md'
-                          : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                      className={`p-3 rounded-2xl border transition-all text-center flex flex-col justify-between space-y-2 ${
+                        isRevealed && isCorrectAnswer
+                          ? 'bg-emerald-600/30 border-emerald-400 ring-2 ring-emerald-500/40'
+                          : 'bg-slate-950/80 border-slate-800'
                       }`}
                     >
-                      {/* Option Number */}
-                      <div className="text-2xl sm:text-3xl font-black font-mono tracking-wider text-white">
-                        {toHindi(opt)}
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                        <span>خيار ({toHindi(i + 1)})</span>
+                        {isRevealed && isCorrectAnswer && (
+                          <span className="text-emerald-400 font-black flex items-center gap-0.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>الصحيح</span>
+                          </span>
+                        )}
                       </div>
 
-                      {/* Pick Count Badge */}
-                      <div className="pt-2 flex items-center justify-center gap-1.5 flex-wrap">
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                          studentPicks.length > 0
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-800 text-slate-500'
-                        }`}>
-                          {toHindi(studentPicks.length)} {studentPicks.length === 1 ? 'طالب' : 'طلاب'}
-                        </span>
+                      {/* Number Display */}
+                      <span className={`text-3xl sm:text-4xl font-black font-mono tracking-wider ${
+                        isRevealed && isCorrectAnswer ? 'text-emerald-300' : 'text-white'
+                      }`}>
+                        {toHindi(opt)}
+                      </span>
 
-                        {/* List of Student names who picked this (hidden if teacher activates smartboard hide mode) */}
-                        {!hideStudentPicksOnBoard && studentPicks.length > 0 && (
-                          <div className="w-full flex flex-wrap items-center justify-center gap-1 pt-1">
+                      {/* Student picks distribution */}
+                      <div className="min-h-[22px] flex items-center justify-center">
+                        {!hideStudentPicksOnBoard && studentPicks.length > 0 ? (
+                          <div className="flex items-center gap-1 flex-wrap justify-center">
                             {studentPicks.map(name => (
                               <span
                                 key={name}
-                                className="text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-slate-950/80 text-slate-300 border border-slate-800 truncate max-w-[90px]"
+                                className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold truncate max-w-[80px]"
                               >
                                 {name}
                               </span>
                             ))}
                           </div>
+                        ) : studentPicks.length > 0 ? (
+                          <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-900 px-2 py-0.5 rounded-md">
+                            {toHindi(studentPicks.length)} اختيارات
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-600 font-mono">-</span>
                         )}
                       </div>
                     </div>
@@ -486,271 +759,80 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
         </div>
 
         {/* ------------------------------------------------------------- */}
-        {/* 3. TEACHER DASHBOARD VIEW: CARDS vs MATRIX                    */}
+        {/* 4. CLASSROOM RESPONSE MATRIX (WHEN TOGGLED)                  */}
         {/* ------------------------------------------------------------- */}
-        {viewMode === 'cards' ? (
-          <div className="space-y-3">
-            {/* Filter Tabs & Search Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
-              <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-2xl border border-slate-800">
-                <button
-                  onClick={() => { sounds.playTap(); setFilter('all'); }}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
-                    filter === 'all' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  الكل ({toHindi(sortedStudents.length)})
-                </button>
-                <button
-                  onClick={() => { sounds.playTap(); setFilter('answered'); }}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
-                    filter === 'answered' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  أجابوا السؤال ({toHindi(currentQStats.answeredCount)})
-                </button>
-                <button
-                  onClick={() => { sounds.playTap(); setFilter('thinking'); }}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
-                    filter === 'thinking' ? 'bg-indigo-600 text-white font-black' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  يفكرون الآن ({toHindi(currentQStats.totalStudents - currentQStats.answeredCount)})
-                </button>
-                <button
-                  onClick={() => { sounds.playTap(); setFilter('struggling'); }}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
-                    filter === 'struggling' ? 'bg-red-500 text-white font-black' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  لديهم أخطاء ⚠️
-                </button>
-              </div>
-
-              {/* Search Bar */}
-              <div className="relative w-44 sm:w-56">
-                <Search className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="بحث عن طالب..."
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl py-1 pr-8 pl-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                />
-              </div>
-            </div>
-
-            {/* Student Cards Grid (Compact, Highly Detailed) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-              {filteredStudents.map((s, idx) => {
-                const qIdx = room.currentQuestionIndex;
-                const currentAnswer = s.answers.find(a => a.questionIndex === qIdx);
-                const wrongCount = s.answers.filter(a => !a.isCorrect).length;
-                const totalAnswered = s.answers.length;
-                const accuracy = totalAnswered > 0 ? Math.round((s.correctCount / totalAnswered) * 100) : 100;
-                const rank = idx + 1;
-
-                return (
-                  <motion.div
-                    key={s.name}
-                    layout
-                    whileHover={{ scale: 1.01 }}
-                    onClick={() => { sounds.playTap(); setSelectedStudentForInspect(s); }}
-                    className="p-3 rounded-2xl bg-slate-900 border border-slate-800 hover:border-indigo-500/60 shadow-lg cursor-pointer transition-all flex flex-col justify-between space-y-2.5 relative group"
-                  >
-                    {/* Top row: Rank, Name, and Streak */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {/* Rank Badge */}
-                        <span className={`w-6 h-6 rounded-lg text-xs font-black font-mono flex items-center justify-center shrink-0 ${
-                          rank === 1
-                            ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/20'
-                            : rank === 2
-                            ? 'bg-slate-300 text-slate-950'
-                            : rank === 3
-                            ? 'bg-amber-700 text-white'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}>
-                          {toHindi(rank)}
-                        </span>
-
-                        <span className="font-bold text-sm text-white truncate max-w-[130px]" title={s.name}>
-                          {s.name}
-                        </span>
-                      </div>
-
-                      {/* Score */}
-                      <div className="text-right">
-                        <span className="text-base font-black text-amber-400 font-mono">
-                          {toHindi(s.score)}
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-bold block -mt-1">نقطة</span>
-                      </div>
-                    </div>
-
-                    {/* Middle row: Correct / Wrong / Accuracy Metrics */}
-                    <div className="grid grid-cols-3 gap-1.5 py-1 bg-slate-950/60 p-1.5 rounded-xl border border-slate-800/80 text-center">
-                      <div>
-                        <span className="text-[10px] text-slate-400 block font-bold">صحيح</span>
-                        <span className="text-xs font-black text-emerald-400 font-mono">
-                          ✓ {toHindi(s.correctCount)}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 block font-bold">خطأ</span>
-                        <span className="text-xs font-black text-red-400 font-mono">
-                          ✗ {toHindi(wrongCount)}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 block font-bold">الدقة</span>
-                        <span className="text-xs font-black text-indigo-300 font-mono">
-                          {toHindi(accuracy)}٪
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Bottom row: Current Question Live Status */}
-                    <div className="pt-0.5">
-                      {currentAnswer ? (
-                        <div className={`p-1.5 rounded-xl text-[11px] font-black flex items-center justify-between ${
-                          currentAnswer.isCorrect
-                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-red-500/15 text-red-300 border border-red-500/30'
-                        }`}>
-                          <div className="flex items-center gap-1 truncate">
-                            {currentAnswer.isCorrect ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
-                            <span>
-                              {currentAnswer.isCorrect
-                                ? `أصاب (+${toHindi(currentAnswer.pointsEarned)})`
-                                : `أخطأ (اختار: ${toHindi(currentAnswer.selectedOption)})`}
-                            </span>
-                          </div>
-                          <span className="text-[10px] font-mono text-slate-400 shrink-0">
-                            {toHindi(currentAnswer.timeSpent.toFixed(1))}ث
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="p-1.5 rounded-xl bg-slate-800/60 text-slate-400 border border-slate-800 text-[11px] font-bold flex items-center justify-center gap-1.5">
-                          <Timer className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                          <span>يفكّر في السؤال الآن...</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Streak indicator if active */}
-                    {s.streak >= 2 && (
-                      <div className="absolute top-1 left-1.5 flex items-center gap-0.5 text-[10px] font-black text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20">
-                        <Flame className="w-2.5 h-2.5 fill-current" />
-                        <span>{toHindi(s.streak)}</span>
-                      </div>
-                    )}
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          /* ------------------------------------------------------------- */
-          /* 4. CLASSROOM RESPONSE MATRIX (STUDENT vs QUESTIONS GRID)      */
-          /* ------------------------------------------------------------- */
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl overflow-hidden space-y-3">
+        {viewMode === 'matrix' && (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-3 sm:p-4 shadow-xl overflow-hidden space-y-2">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Table2 className="w-4 h-4 text-indigo-400" />
-                <h3 className="text-sm font-black text-white">
-                  مصفوفة الإجابات التفاعلية لجميع الأسئلة
-                </h3>
+                <h3 className="text-xs font-black text-white">مصفوفة الإجابات التفاعلية</h3>
               </div>
-              <span className="text-xs text-slate-400 font-bold">
-                اضغط على اسم أي طالب لمعاينة تحليله الفردي
-              </span>
+              <button
+                onClick={() => setViewMode('cards')}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-bold"
+              >
+                العودة للبطاقات
+              </button>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-right text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 font-bold">
-                    <th className="py-2.5 px-3">الترتيب</th>
-                    <th className="py-2.5 px-3">اسم الطالب</th>
-                    <th className="py-2.5 px-3 text-center">النقاط</th>
+                    <th className="py-2 px-3">الاسم</th>
+                    <th className="py-2 px-3 text-center">الدرجة والنسبة</th>
                     {room.questions.map((q, qIndex) => (
-                      <th key={q.id} className="py-2.5 px-2 text-center font-mono">
+                      <th key={q.id} className="py-2 px-1 text-center font-mono">
                         س{toHindi(qIndex + 1)}
                       </th>
                     ))}
-                    <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">صحيح</th>
-                    <th className="py-2.5 px-2 text-center text-red-400 font-bold">خطأ</th>
-                    <th className="py-2.5 px-2 text-center font-bold">الدقة</th>
+                    <th className="py-2 px-2 text-center text-emerald-400">صحيح</th>
+                    <th className="py-2 px-2 text-center text-red-400">خطأ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-mono">
-                  {sortedStudents.map((s, idx) => {
+                  {sortedStudents.map(s => {
                     const wrongCount = s.answers.filter(a => !a.isCorrect).length;
-                    const totalAnswered = s.answers.length;
-                    const accuracy = totalAnswered > 0 ? Math.round((s.correctCount / totalAnswered) * 100) : 100;
-
+                    const pct = totalQ > 0 ? Math.round((s.score / totalQ) * 100) : 0;
                     return (
                       <tr
                         key={s.name}
-                        onClick={() => { sounds.playTap(); setSelectedStudentForInspect(s); }}
-                        className="hover:bg-slate-800/60 cursor-pointer transition-colors"
+                        onClick={() => setSelectedStudentForInspect(s)}
+                        className="hover:bg-slate-800/60 cursor-pointer"
                       >
-                        <td className="py-2 px-3 font-bold text-slate-400">
-                          {toHindi(idx + 1)}
-                        </td>
                         <td className="py-2 px-3 font-sans font-black text-white">
                           {s.name}
                         </td>
-                        <td className="py-2 px-3 text-center font-black text-amber-400 font-mono">
-                          {toHindi(s.score)}
+                        <td className="py-2 px-3 text-center font-black text-amber-400">
+                          {toHindi(s.score)} درجات ({toHindi(pct)}٪)
                         </td>
-
-                        {/* Question by question cells */}
                         {room.questions.map((q, qIndex) => {
                           const ans = s.answers.find(a => a.questionIndex === qIndex);
-                          const isCurrent = qIndex === room.currentQuestionIndex;
-
                           if (ans) {
                             return (
                               <td key={q.id} className="py-2 px-1 text-center">
-                                <span
-                                  title={`اختار: ${ans.selectedOption} | الزمن: ${ans.timeSpent}ث`}
-                                  className={`inline-block w-6 h-6 rounded-md text-[11px] font-black leading-6 ${
-                                    ans.isCorrect
-                                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                                      : 'bg-red-500/20 text-red-300 border border-red-500/40'
-                                  }`}
-                                >
+                                <span className={`inline-block w-5 h-5 rounded text-[10px] font-black leading-5 ${
+                                  ans.isCorrect
+                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    : 'bg-red-500/20 text-red-300'
+                                }`}>
                                   {ans.isCorrect ? '✓' : '✗'}
                                 </span>
                               </td>
                             );
-                          } else if (isCurrent) {
-                            return (
-                              <td key={q.id} className="py-2 px-1 text-center">
-                                <span className="inline-block w-6 h-6 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] leading-6 animate-pulse">
-                                  ⏳
-                                </span>
-                              </td>
-                            );
-                          } else {
-                            return (
-                              <td key={q.id} className="py-2 px-1 text-center text-slate-700">
-                                -
-                              </td>
-                            );
                           }
+                          return (
+                            <td key={q.id} className="py-2 px-1 text-center text-slate-700">
+                              -
+                            </td>
+                          );
                         })}
-
                         <td className="py-2 px-2 text-center text-emerald-400 font-black">
                           {toHindi(s.correctCount)}
                         </td>
                         <td className="py-2 px-2 text-center text-red-400 font-black">
                           {toHindi(wrongCount)}
-                        </td>
-                        <td className="py-2 px-2 text-center font-bold text-indigo-300">
-                          {toHindi(accuracy)}٪
                         </td>
                       </tr>
                     );
@@ -767,122 +849,147 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
       {/* ------------------------------------------------------------- */}
       <AnimatePresence>
         {selectedStudentForInspect && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 dir-rtl">
+          <div
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setSelectedStudentForInspect(null)}
+          >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col justify-between"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-lg w-full shadow-2xl space-y-4"
             >
-              {/* Modal Header */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
-                    <Trophy className="w-5 h-5" />
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 font-black text-xs">
+                    {selectedStudentForInspect.name[0]}
                   </div>
                   <div>
                     <h3 className="text-base font-black text-white">{selectedStudentForInspect.name}</h3>
-                    <span className="text-xs text-amber-400 font-bold font-mono">
-                      مجموع النقاط: {toHindi(selectedStudentForInspect.score)} نقطة
+                    <span className="text-xs text-amber-400 font-mono font-bold">
+                      النقاط الإجمالية: {toHindi(selectedStudentForInspect.score)}
                     </span>
                   </div>
                 </div>
-
                 <button
                   onClick={() => setSelectedStudentForInspect(null)}
-                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400"
+                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Summary Stats */}
-              <div className="grid grid-cols-3 gap-2 text-center p-3 rounded-2xl bg-slate-950 border border-slate-800">
-                <div>
-                  <span className="text-[10px] text-slate-400 block font-bold">الإجابات الصحيحة</span>
-                  <span className="text-base font-black text-emerald-400 font-mono">
-                    {toHindi(selectedStudentForInspect.correctCount)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 block font-bold">الإجابات الخاطئة</span>
-                  <span className="text-base font-black text-red-400 font-mono">
-                    {toHindi(selectedStudentForInspect.answers.filter(a => !a.isCorrect).length)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 block font-bold">نسبة الدقة</span>
-                  <span className="text-base font-black text-indigo-400 font-mono">
-                    {toHindi(
-                      selectedStudentForInspect.answers.length > 0
-                        ? Math.round(
-                            (selectedStudentForInspect.correctCount / selectedStudentForInspect.answers.length) * 100
-                          )
-                        : 100
-                    )}٪
-                  </span>
-                </div>
-              </div>
-
-              {/* Answers Log */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-72">
-                <span className="text-xs font-bold text-slate-400 block pb-1">
-                  سجل الأسئلة والإجابات بالتفصيل:
-                </span>
-
-                {room.questions.map((q, qIndex) => {
-                  const ans = selectedStudentForInspect.answers.find(a => a.questionIndex === qIndex);
-
+              {/* Answers Breakdown */}
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                {room.questions.map((q, idx) => {
+                  const ans = selectedStudentForInspect.answers.find(a => a.questionIndex === idx);
                   return (
                     <div
                       key={q.id}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                      className={`p-2.5 rounded-xl border text-xs flex items-center justify-between ${
                         ans
                           ? ans.isCorrect
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-slate-200'
-                            : 'bg-red-500/10 border-red-500/30 text-slate-200'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-500'
+                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                            : 'bg-red-500/10 border-red-500/20 text-red-300'
+                          : 'bg-slate-950/60 border-slate-800/80 text-slate-500'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-md bg-slate-800 text-slate-300 font-mono font-bold flex items-center justify-center text-[10px]">
-                          {toHindi(qIndex + 1)}
-                        </span>
-                        <span className="font-mono font-black text-sm text-white">
-                          {toHindi(q.a)} {q.operation} {toHindi(q.b)} = {toHindi(q.answer)}
-                        </span>
+                      <div className="flex items-center gap-2 font-mono">
+                        <span className="font-bold text-slate-400">س{toHindi(idx + 1)}:</span>
+                        <span>{toHindi(q.a)} {q.operation} {toHindi(q.b)} = {toHindi(q.answer)}</span>
                       </div>
-
                       {ans ? (
-                        <div className="flex items-center gap-3">
-                          <span className="font-bold">
-                            اختياره: <span className="font-mono font-black">{toHindi(ans.selectedOption)}</span>
-                          </span>
-                          <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
-                            ans.isCorrect ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
-                          }`}>
-                            {ans.isCorrect ? `✓ صح (+${toHindi(ans.pointsEarned)})` : '✗ خطأ'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {toHindi(ans.timeSpent.toFixed(1))}ث
-                          </span>
+                        <div className="flex items-center gap-2 font-mono">
+                          <span>اختار: {toHindi(ans.selectedOption)}</span>
+                          <span>({toHindi(ans.timeSpent.toFixed(1))}ث)</span>
                         </div>
                       ) : (
-                        <span className="text-slate-500 font-bold text-[11px]">
-                          لم يصل إليه بعد
-                        </span>
+                        <span>لم يجب بعد</span>
                       )}
                     </div>
                   );
                 })}
               </div>
 
-              {/* Close Button */}
               <button
                 onClick={() => setSelectedStudentForInspect(null)}
-                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-colors"
+                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs"
               >
                 إغلاق
+              </button>
+            </motion.div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* 6. PROMINENT BARCODE MODAL WITH EASY "RETURN TO QUESTIONS"    */}
+        {/* ------------------------------------------------------------- */}
+        {showQrModal && (
+          <div
+            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4"
+            onClick={() => setShowQrModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-7 max-w-md w-full shadow-2xl text-center space-y-4"
+            >
+              {/* Top Header with BIG RETURN BUTTON */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <RiyadhEbdaaLogo size="xs" />
+                <button
+                  onClick={() => setShowQrModal(false)}
+                  className="px-3 py-1.5 rounded-xl bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 text-xs font-black flex items-center gap-1.5 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                  <span>العودة للأسئلة</span>
+                </button>
+              </div>
+
+              <div>
+                <h3 className="text-xl font-black text-white">باركود انضمام الطلاب</h3>
+                <p className="text-xs text-slate-400 font-bold mt-1">
+                  امسح الباركود بكاميرا الجوال للدخول الفوري للمسابقة
+                </p>
+              </div>
+
+              {/* Room Code */}
+              <div className="py-1">
+                <span className="text-[11px] font-bold text-slate-400 block mb-1">رمز الغرفة:</span>
+                <span className="text-4xl font-black text-amber-400 font-mono tracking-widest bg-slate-950 px-6 py-2 rounded-2xl border border-slate-800 inline-block shadow-inner">
+                  {roomId}
+                </span>
+              </div>
+
+              {/* Big High-Res QR Code */}
+              <div className="p-3 bg-white rounded-2xl inline-block shadow-xl">
+                <QRCodeCanvas value={getPublicUrl(`?room=${roomId}`)} size={210} />
+              </div>
+
+              {/* Link Box */}
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                <span className="text-[10px] text-emerald-400 font-mono block truncate select-all dir-ltr">
+                  {getPublicUrl(`?room=${roomId}`)}
+                </span>
+                <button
+                  onClick={handleCopyLink}
+                  className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{copiedLink ? 'تم نسخ الرابط بنجاح!' : 'نسخ رابط الغرفة'}</span>
+                </button>
+              </div>
+
+              {/* Prominent Bottom Return Button */}
+              <button
+                onClick={() => setShowQrModal(false)}
+                className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                <X className="w-4 h-4 stroke-[3]" />
+                <span>العودة الفورية لشاشة الأسئلة والمسابقة</span>
               </button>
             </motion.div>
           </div>

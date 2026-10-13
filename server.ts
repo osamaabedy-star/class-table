@@ -174,16 +174,54 @@ function updateRoomState(room: Room) {
     return;
   }
 
-  // If playing, check if all active students have answered current question
+  // If playing, check simulated students and whether all active students answered
   if (room.status === 'playing') {
     const studentList = Object.values(room.students);
+    const q = room.questions[room.currentQuestionIndex];
+
+    // Simulate answering for test student named "تجريبي"
+    if (q && studentList.length > 0) {
+      studentList.forEach(s => {
+        const isTestStudent = s.name.includes('تجريبي');
+        const alreadyAnswered = s.answers.some(a => a.questionIndex === room.currentQuestionIndex);
+        if (isTestStudent && !alreadyAnswered) {
+          // After ~1.2s from question start, test student answers
+          if (now - room.questionStartedAt >= 1300) {
+            const isCorrect = Math.random() < 0.85;
+            const selectedOption = isCorrect
+              ? q.answer
+              : (q.options.find(opt => opt !== q.answer) ?? q.options[0]);
+            const timeSpent = Math.min(room.config.timePerQuestion, Math.max(1, (now - room.questionStartedAt) / 1000));
+            let pointsEarned = 0;
+            if (isCorrect) {
+              s.streak += 1;
+              s.correctCount += 1;
+              pointsEarned = 1; // Exactly 1 point per correct answer
+              s.score += pointsEarned;
+            } else {
+              s.streak = 0;
+            }
+            s.answers.push({
+              questionIndex: room.currentQuestionIndex,
+              selectedOption,
+              isCorrect,
+              timeSpent,
+              pointsEarned
+            });
+            s.currentIndex = room.currentQuestionIndex + 1;
+            s.lastActive = now;
+          }
+        }
+      });
+    }
+
     if (studentList.length > 0) {
       const allAnswered = studentList.every(s =>
         s.answers.some(a => a.questionIndex === room.currentQuestionIndex)
       );
 
-      // Or if question timer expired (e.g. timePerQuestion + 2s buffer)
-      const timeoutExpired = (now - room.questionStartedAt) > ((room.config.timePerQuestion + 2) * 1000);
+      // Or if question timer expired
+      const timeoutExpired = (now - room.questionStartedAt) > ((room.config.timePerQuestion + 1) * 1000);
 
       if (allAnswered || timeoutExpired) {
         room.status = 'intermission';
@@ -364,11 +402,7 @@ app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
   if (isCorrect) {
     student.streak += 1;
     student.correctCount += 1;
-    const base = 10;
-    const speedRatio = Math.max(0, Math.min(1, (timeRemaining || 0) / room.config.timePerQuestion));
-    const speedBonus = Math.round(speedRatio * 5);
-    const streakBonus = Math.min(student.streak * 2, 6);
-    pointsEarned = base + speedBonus + streakBonus;
+    pointsEarned = 1; // Exactly 1 point per correct answer
     student.score += pointsEarned;
   } else {
     student.streak = 0;
@@ -426,6 +460,69 @@ app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
     room.status = 'finished';
   }
   res.json({ success: true, room });
+});
+
+// 8. Go back to previous question by teacher
+app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
+  const { roomId } = req.params;
+  const room = rooms[roomId.toUpperCase()];
+  if (!room) {
+    res.status(404).json({ error: 'الغرفة غير موجودة' });
+    return;
+  }
+  if (room.currentQuestionIndex > 0) {
+    room.currentQuestionIndex -= 1;
+    room.status = 'playing';
+    room.questionStartedAt = Date.now();
+  }
+  res.json({ success: true, room });
+});
+
+// 9. Repeat current question (reset answers for current index)
+app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
+  const { roomId } = req.params;
+  const room = rooms[roomId.toUpperCase()];
+  if (!room) {
+    res.status(404).json({ error: 'الغرفة غير موجودة' });
+    return;
+  }
+  const qIdx = room.currentQuestionIndex;
+  Object.values(room.students).forEach(s => {
+    s.answers = s.answers.filter(a => a.questionIndex !== qIdx);
+  });
+  room.status = 'playing';
+  room.questionStartedAt = Date.now();
+  res.json({ success: true, room });
+});
+
+// 10. Add mock/test student named "تجريبي" only
+app.post('/api/rooms/:roomId/add-test-student', (req: Request, res: Response) => {
+  const { roomId } = req.params;
+  const room = rooms[roomId.toUpperCase()];
+  if (!room) {
+    res.status(404).json({ error: 'الغرفة غير موجودة' });
+    return;
+  }
+  const studentCount = Object.keys(room.students).filter(k => k.includes('تجريبي')).length;
+  const testName = studentCount === 0 ? 'تجريبي' : `تجريبي ${studentCount + 1}`;
+  room.students[testName] = {
+    name: testName,
+    score: 0,
+    currentIndex: 0,
+    correctCount: 0,
+    streak: 0,
+    answers: [],
+    lastActive: Date.now(),
+    completed: false
+  };
+
+  if (room.roomType === 'duel' && Object.keys(room.students).length === 2 && room.status === 'lobby') {
+    room.status = 'playing';
+    room.currentQuestionIndex = 0;
+    room.questionStartedAt = Date.now();
+  }
+
+  res.json({ success: true, room, addedName: testName });
 });
 
 // ============================================================
@@ -703,6 +800,10 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
+}
+
+export default app;
