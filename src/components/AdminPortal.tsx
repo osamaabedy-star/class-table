@@ -31,7 +31,12 @@ import {
   Printer,
   ChevronDown,
   Layers,
-  Radio
+  Radio,
+  Mail,
+  Eye,
+  EyeOff,
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 import { RiyadhEbdaaLogo } from './RiyadhEbdaaLogo';
 import { toHindi } from '../utils/format';
@@ -54,12 +59,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onBack,
   onOpenCertificate
 }) => {
-  // Authentication PIN
+  // Authentication State strictly locked to osamaabedy@gmail.com
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('riyadh_admin_auth') === 'true';
+    const isAuth = localStorage.getItem('riyadh_admin_auth') === 'true';
+    const email = localStorage.getItem('riyadh_admin_email');
+    return isAuth && email === 'osamaabedy@gmail.com';
   });
-  const [pinInput, setPinInput] = useState<string>('');
-  const [pinError, setPinError] = useState<string>('');
+  const [emailInput, setEmailInput] = useState<string>('');
+  const [passwordInput, setPasswordInput] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [loginError, setLoginError] = useState<string>('');
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'roster' | 'upload' | 'analytics' | 'honor' | 'liveRooms'>('roster');
@@ -133,16 +142,37 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   }, [isAuthenticated, loadData]);
 
-  // Handle Login
-  const handleLogin = (e: React.FormEvent) => {
+  // Handle Strict Admin Login
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pinInput === '1234' || pinInput === '2026' || pinInput === 'admin') {
+    setLoginError('');
+
+    const cleanEmail = emailInput.trim().toLowerCase();
+    const cleanPass = passwordInput.trim();
+
+    // Verify authorized administrator: osamaabedy@gmail.com / 990001
+    const isAuthorized = cleanEmail === 'osamaabedy@gmail.com' && cleanPass === '990001';
+
+    if (isAuthorized) {
       setIsAuthenticated(true);
       localStorage.setItem('riyadh_admin_auth', 'true');
-      setPinError('');
+      localStorage.setItem('riyadh_admin_email', 'osamaabedy@gmail.com');
       sounds.playSuccess();
+      try {
+        await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, password: cleanPass })
+        });
+      } catch {
+        // Local auth valid
+      }
     } else {
-      setPinError('رمز المرور غير صحيح (الافتراضي: ١٢٣٤)');
+      if (cleanEmail !== 'osamaabedy@gmail.com') {
+        setLoginError('البريد الإلكتروني غير مصرح له بالدخول. هذه اللوحة مخصصة للأستاذ أسامة العابدي فقط');
+      } else {
+        setLoginError('كلمة المرور غير صحيحة');
+      }
       sounds.playWrong();
     }
   };
@@ -150,7 +180,46 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleLogout = () => {
     setIsAuthenticated(false);
     localStorage.removeItem('riyadh_admin_auth');
+    localStorage.removeItem('riyadh_admin_email');
+    setEmailInput('');
+    setPasswordInput('');
     sounds.playTap();
+  };
+
+  // Export & Import Roster JSON
+  const handleExportJSON = () => {
+    sounds.playTap();
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(students, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `riyadh_students_${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    showToast('تم تصدير ملف الطلاب بنجاح');
+  };
+
+  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setStudents(parsed);
+          await syncStudentsListToServer(parsed);
+          showToast(`تم استيراد ${parsed.length} طالب بنجاح`);
+          sounds.playSuccess();
+        } else {
+          showToast('ملف غير صالح');
+        }
+      } catch {
+        showToast('فشل قراءة الملف');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   // Filtered Students for Roster tab
@@ -319,37 +388,65 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </div>
 
             <div>
-              <h2 className="text-base font-black text-white">بوابة الإدارة وتحليل الفصول</h2>
+              <h2 className="text-base font-black text-white">تسجيل دخول المشرف العام</h2>
               <p className="text-[11px] text-slate-400 mt-1">
-                إضافة قوائم الطلاب، تحليل الفصول، ولوحات الشرف
+                مخصص للأستاذ أسامة العابدي
               </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-3">
+            <form onSubmit={handleLogin} className="space-y-3 text-right">
               <div>
-                <label className="text-[10px] font-bold text-slate-400 block mb-1 text-right">
-                  رمز مرور الإدارة (PIN):
+                <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                  البريد الإلكتروني للإدارة:
                 </label>
-                <input
-                  type="password"
-                  maxLength={10}
-                  autoFocus
-                  placeholder="أدخل رمز المرور (الافتراضي: ١٢٣٤)"
-                  value={pinInput}
-                  onChange={e => setPinInput(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-center text-sm font-mono tracking-widest text-white outline-none focus:border-amber-400"
-                />
+                <div className="relative">
+                  <input
+                    type="email"
+                    dir="ltr"
+                    required
+                    autoFocus
+                    placeholder="osamaabedy@gmail.com"
+                    value={emailInput}
+                    onChange={e => setEmailInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs font-mono text-white outline-none focus:border-amber-400 transition-colors"
+                  />
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
               </div>
 
-              {pinError && (
-                <p className="text-[11px] text-rose-400 font-bold bg-rose-500/10 py-1 rounded-lg border border-rose-500/20">
-                  {pinError}
+              <div>
+                <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                  كلمة المرور:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    dir="ltr"
+                    required
+                    placeholder="••••••"
+                    value={passwordInput}
+                    onChange={e => setPasswordInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs font-mono text-white outline-none focus:border-amber-400 transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(p => !p)}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {loginError && (
+                <p className="text-[11px] text-rose-400 font-bold bg-rose-500/10 py-1.5 px-2 rounded-lg border border-rose-500/20 text-center">
+                  {loginError}
                 </p>
               )}
 
               <button
                 type="submit"
-                className="w-full py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5 mt-2"
               >
                 <span>دخول لوحة التحكم</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -414,6 +511,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>osamaabedy@gmail.com</span>
+            </div>
             <RiyadhEbdaaLogo size="xs" />
             <button
               onClick={handleLogout}
@@ -579,6 +680,29 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <UserPlus className="w-3.5 h-3.5" />
                   <span>طالب جديد</span>
                 </button>
+
+                <button
+                  onClick={handleExportJSON}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1 shrink-0 border border-slate-700"
+                  title="تصدير ملف النسخ الاحتياطي للطلاب"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">تصدير</span>
+                </button>
+
+                <label
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1 shrink-0 border border-slate-700 cursor-pointer"
+                  title="استيراد ملف النسخ الاحتياطي للطلاب"
+                >
+                  <Upload className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">استيراد</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={handleImportJSON}
+                  />
+                </label>
               </div>
             </div>
 

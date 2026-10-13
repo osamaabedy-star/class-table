@@ -712,12 +712,17 @@ export default function App() {
         body: JSON.stringify(configData)
       });
       const data = await res.json();
-      setRoomId(data.roomId);
-      setRoom(data.room);
-      setIsTeacher(true);
-      setView('lobby');
-    } catch {
-      showToast('حدث خطأ أثناء إنشاء الغرفة');
+      if (res.ok && data.roomId && data.room) {
+        setRoomId(data.roomId);
+        setRoom(data.room);
+        setIsTeacher(true);
+        setView('lobby');
+      } else {
+        showToast(data?.error || 'حدث خطأ أثناء إنشاء الغرفة');
+      }
+    } catch (err) {
+      console.error('Create room error:', err);
+      showToast('حدث خطأ أثناء إنشاء الغرفة، يرجى المحاولة ثانية');
     }
   };
 

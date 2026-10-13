@@ -14,10 +14,14 @@ app.use(express.json());
 app.use((req: Request, res: Response, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
     return;
+  }
+  // Normalize URL if Vercel serverless rewrite removed or forwarded without /api
+  if (!req.url.startsWith('/api') && (req.url.startsWith('/rooms') || req.url.startsWith('/school') || req.url.startsWith('/admin'))) {
+    req.url = '/api' + req.url;
   }
   next();
 });
@@ -544,27 +548,50 @@ export interface SchoolStudent {
 }
 
 const SCHOOL_DATA_FILE = join(__dirname, 'school_students.json');
+let inMemoryStudentsCache: SchoolStudent[] = [];
 
 function loadSchoolStudents(): SchoolStudent[] {
+  if (inMemoryStudentsCache.length > 0) return inMemoryStudentsCache;
   try {
     if (fs.existsSync(SCHOOL_DATA_FILE)) {
       const data = fs.readFileSync(SCHOOL_DATA_FILE, 'utf-8');
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        inMemoryStudentsCache = parsed;
+        return inMemoryStudentsCache;
+      }
     }
   } catch (e) {
     console.error('Failed to read school_students.json:', e);
   }
-  return [];
+  return inMemoryStudentsCache;
 }
 
 function saveSchoolStudents(list: SchoolStudent[]) {
+  inMemoryStudentsCache = list;
   try {
     fs.writeFileSync(SCHOOL_DATA_FILE, JSON.stringify(list, null, 2), 'utf-8');
   } catch (e) {
-    console.error('Failed to save school_students.json:', e);
+    // In serverless / read-only filesystems (e.g. Vercel), preserve in memory safely
+    console.warn('Filesystem read-only (e.g. Vercel), cached in memory:', e);
   }
 }
+
+// Admin login verification endpoint
+app.post('/api/admin/login', (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  const adminEmail = (process.env.ADMIN_EMAIL || 'osamaabedy@gmail.com').trim().toLowerCase();
+  const adminPassword = (process.env.ADMIN_PASSWORD || '990001').trim();
+
+  const userEmail = (email || '').trim().toLowerCase();
+  const userPassword = (password || '').trim();
+
+  if (userEmail === adminEmail && userPassword === adminPassword) {
+    res.json({ success: true, email: adminEmail });
+  } else {
+    res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة، الوصول مخصص للأستاذ أسامة العابدي فقط' });
+  }
+});
 
 // 1. Get school students
 app.get('/api/school/students', (req: Request, res: Response) => {
@@ -772,31 +799,33 @@ app.get('/api/school/analytics', (req: Request, res: Response) => {
   });
 });
 
-// Serve web app
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(join(__dirname, 'dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(join(__dirname, 'dist', 'index.html'));
-  });
-} else {
-  const { createServer: createViteServer } = await import('vite');
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'custom',
-  });
-  app.use(vite.middlewares);
-  app.use('*', async (req, res) => {
-    const url = req.originalUrl;
-    try {
-      const indexPath = join(__dirname, 'index.html');
-      let template = fs.readFileSync(indexPath, 'utf-8');
-      template = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-    } catch (e) {
-      vite.ssrFixStacktrace(e as Error);
-      res.status(500).end((e as Error).message);
-    }
-  });
+// Serve web app only in standalone / local server (not inside Vercel serverless functions)
+if (!process.env.VERCEL) {
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(join(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(join(__dirname, 'dist', 'index.html'));
+    });
+  } else {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'custom',
+    });
+    app.use(vite.middlewares);
+    app.use('*', async (req, res) => {
+      const url = req.originalUrl;
+      try {
+        const indexPath = join(__dirname, 'index.html');
+        let template = fs.readFileSync(indexPath, 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        res.status(500).end((e as Error).message);
+      }
+    });
+  }
 }
 
 const port = process.env.PORT || 3000;
