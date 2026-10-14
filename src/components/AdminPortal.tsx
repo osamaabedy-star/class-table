@@ -36,7 +36,8 @@ import {
   Eye,
   EyeOff,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Database
 } from 'lucide-react';
 import { RiyadhEbdaaLogo } from './RiyadhEbdaaLogo';
 import { toHindi } from '../utils/format';
@@ -48,6 +49,12 @@ import {
   syncStudentsListToServer,
   parsePastedStudentNames
 } from '../data/students';
+import {
+  TestSessionRecord,
+  fetchTestSessionsFromServer,
+  exportTestDatabaseToExcel,
+  deleteTestSessionFromDatabase
+} from '../data/testDatabase';
 import { sounds } from '../utils/audio';
 
 interface AdminPortalProps {
@@ -100,6 +107,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Analytics Data from API
   const [analytics, setAnalytics] = useState<any>(null);
 
+  // Test Database Records (for analytics)
+  const [testSessions, setTestSessions] = useState<TestSessionRecord[]>([]);
+  const [inspectingTest, setInspectingTest] = useState<TestSessionRecord | null>(null);
+
   // Live Rooms Data
   const [liveRooms, setLiveRooms] = useState<any[]>([]);
 
@@ -122,6 +133,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         const anaData = await anaRes.json();
         setAnalytics(anaData);
       }
+
+      // Fetch test database
+      const tests = await fetchTestSessionsFromServer();
+      setTestSessions(tests);
 
       // Fetch active rooms
       const roomsRes = await fetch('/api/rooms');
@@ -1023,6 +1038,113 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
               </div>
             )}
+
+            {/* 3. TEST SESSIONS DATABASE & HISTORICAL ANALYTICS */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-xs sm:text-sm font-black text-white">
+                    قاعدة بيانات الاختبارات المنجزة ({toHindi(testSessions.length)} اختبار موثق)
+                  </h3>
+                </div>
+
+                {testSessions.length > 0 && (
+                  <button
+                    onClick={() => exportTestDatabaseToExcel(testSessions)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>تصدير قاعدة بيانات الاختبارات (Excel)</span>
+                  </button>
+                )}
+              </div>
+
+              {testSessions.length === 0 ? (
+                <div className="py-8 text-center bg-slate-950/60 rounded-xl border border-slate-800/80 p-4 space-y-1">
+                  <Database className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-xs text-slate-400 font-bold">لا توجد اختبارات مسجلة بعد في قاعدة البيانات</p>
+                  <p className="text-[11px] text-slate-500">
+                    عند إنجاز أي مسابقة أو اختبار سبورة، ستظهر سجلاته ونتائج الطلاب التفصيلية هنا تلقائياً للتحليل
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-[11px] text-slate-400 font-bold">
+                        <th className="py-2.5 px-3">التاريخ والوقت</th>
+                        <th className="py-2.5 px-3">عنوان الاختبار / الصف</th>
+                        <th className="py-2.5 px-3">الجداول المختبرة</th>
+                        <th className="py-2.5 px-3">المشاركون</th>
+                        <th className="py-2.5 px-3">متوسط الدقة</th>
+                        <th className="py-2.5 px-3">فارس الاختبار</th>
+                        <th className="py-2.5 px-3 text-center">الإجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-bold">
+                      {testSessions.map(test => (
+                        <tr key={test.id} className="hover:bg-slate-800/30">
+                          <td className="py-2.5 px-3 text-slate-400 font-mono text-[11px] whitespace-nowrap">
+                            {test.dateFormatted}
+                          </td>
+                          <td className="py-2.5 px-3 text-white">
+                            <span className="block font-black">{test.title}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {test.gradeName} • فصل {test.section}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-indigo-300 font-mono">
+                            {test.tables.map(t => toHindi(t)).join('، ')}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 font-mono">
+                            {toHindi(test.totalParticipants)} طالب
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                              {toHindi(test.averageAccuracy)}٪
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-amber-400">
+                            {test.topStudentName}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => setInspectingTest(test)}
+                                className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-bold border border-indigo-500/30 transition-colors"
+                              >
+                                عرض النتائج
+                              </button>
+                              <button
+                                onClick={() => exportTestDatabaseToExcel([test])}
+                                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                                title="تصدير هذا الاختبار كـ Excel"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (window.confirm('هل تريد حذف هذا الاختبار من قاعدة البيانات؟')) {
+                                    await deleteTestSessionFromDatabase(test.id);
+                                    setTestSessions(prev => prev.filter(t => t.id !== test.id));
+                                    showToast('تم حذف سجل الاختبار من قاعدة البيانات');
+                                  }
+                                }}
+                                className="p-1 rounded-lg hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 transition-colors"
+                                title="حذف السجل"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1267,6 +1389,98 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   className="flex-1 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black shadow-md shadow-amber-500/20"
                 >
                   حفظ
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* TEST DETAILS INSPECTION MODAL */}
+      <AnimatePresence>
+        {inspectingTest && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 dir-rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[85vh] flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Database className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-white">{inspectingTest.title}</h3>
+                    <span className="text-[11px] text-slate-400 font-mono">{inspectingTest.dateFormatted}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => exportTestDatabaseToExcel([inspectingTest])}
+                    className="p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-xs font-bold flex items-center gap-1 border border-emerald-500/30"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Excel</span>
+                  </button>
+                  <button
+                    onClick={() => setInspectingTest(null)}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="bg-slate-950 p-2 rounded-xl">
+                  <span className="text-[10px] text-slate-400 block">الجداول المختبرة</span>
+                  <span className="font-bold text-white">{inspectingTest.tables.map(t => toHindi(t)).join('، ')}</span>
+                </div>
+                <div className="bg-slate-950 p-2 rounded-xl">
+                  <span className="text-[10px] text-slate-400 block">متوسط الدقة</span>
+                  <span className="font-bold text-emerald-400">{toHindi(inspectingTest.averageAccuracy)}٪</span>
+                </div>
+                <div className="bg-slate-950 p-2 rounded-xl">
+                  <span className="text-[10px] text-slate-400 block">فارس الاختبار</span>
+                  <span className="font-bold text-amber-400">{inspectingTest.topStudentName}</span>
+                </div>
+                <div className="bg-slate-950 p-2 rounded-xl">
+                  <span className="text-[10px] text-slate-400 block">المشاركون</span>
+                  <span className="font-bold text-indigo-400">{toHindi(inspectingTest.totalParticipants)} طالب</span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto bg-slate-950 rounded-2xl border border-slate-800">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-900 border-b border-slate-800 text-[11px] text-slate-400 font-bold sticky top-0">
+                    <tr>
+                      <th className="py-2 px-3">الترتيب</th>
+                      <th className="py-2 px-3">اسم الطالب</th>
+                      <th className="py-2 px-3">الدرجة</th>
+                      <th className="py-2 px-3">الإجابات الصحيحة</th>
+                      <th className="py-2 px-3">نسبة الدقة</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-bold">
+                    {inspectingTest.participants.map((p, idx) => (
+                      <tr key={idx} className="hover:bg-slate-900/40">
+                        <td className="py-2 px-3 text-amber-400 font-mono">#{toHindi(p.rank)}</td>
+                        <td className="py-2 px-3 text-white">{p.name}</td>
+                        <td className="py-2 px-3 text-indigo-300 font-mono">{toHindi(p.score)}</td>
+                        <td className="py-2 px-3 text-slate-300 font-mono">{toHindi(p.correctAnswers)} / {toHindi(p.totalAnswered)}</td>
+                        <td className="py-2 px-3 text-emerald-400 font-mono">{toHindi(p.percentage)}٪</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 flex justify-end">
+                <button
+                  onClick={() => setInspectingTest(null)}
+                  className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  إغلاق
                 </button>
               </div>
             </motion.div>

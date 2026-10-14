@@ -75,84 +75,9 @@ class SoundEffectsManager {
     this.playCorrect();
   }
 
-  // Play wrong buzzer
+  // Play wrong buzzer (silent as requested, error uses visual red flash only)
   playWrong() {
-    const ctx = this.getContext();
-    if (!ctx) return;
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(160, ctx.currentTime);
-      osc.frequency.linearRampToValueAtTime(110, ctx.currentTime + 0.3);
-
-      gain.gain.setValueAtTime(0.25, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.35);
-    } catch {
-      // ignore
-    }
-  }
-
-  // Play countdown tick
-  playTick(isUrgent: boolean = false) {
-    const ctx = this.getContext();
-    if (!ctx) return;
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(isUrgent ? 880 : 520, ctx.currentTime);
-
-      gain.gain.setValueAtTime(isUrgent ? 0.2 : 0.08, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.06);
-    } catch {
-      // ignore
-    }
-  }
-
-  // Play victory fanfare
-  playFanfare() {
-    const ctx = this.getContext();
-    if (!ctx) return;
-    try {
-      const melody = [
-        { f: 523.25, d: 0.15 },
-        { f: 659.25, d: 0.15 },
-        { f: 783.99, d: 0.15 },
-        { f: 1046.5, d: 0.4 },
-        { f: 880, d: 0.15 },
-        { f: 1046.5, d: 0.6 },
-      ];
-      let t = ctx.currentTime;
-      melody.forEach(item => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(item.f, t);
-
-        gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(0.35, t + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + item.d);
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + item.d);
-        t += item.d * 0.9;
-      });
-    } catch {
-      // ignore
-    }
+    // Silent on error - visual red flash only
   }
 
   // Play wheel spin tick sound
@@ -175,14 +100,12 @@ class SoundEffectsManager {
     }
   }
 
-  // Play Arabic spoken praise using SpeechSynthesis
+  // Play Arabic spoken praise using SpeechSynthesis with single clear words
   playPraiseVoice(isCorrect: boolean = true) {
-    if (!this.enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (!isCorrect || !this.enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
-      const praises = isCorrect
-        ? ['ممتاز يا بطل', 'أحسنت', 'رائع جداً', 'إجابة صحيحة', 'بطل الإبداع']
-        : ['حاول ثانية يا بطل', 'ركز أكثر'];
+      const praises = ['ممتاز', 'أحسنت', 'رائع', 'أنت الأول'];
       const text = praises[Math.floor(Math.random() * praises.length)];
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'ar-SA';

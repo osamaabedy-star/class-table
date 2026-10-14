@@ -74,7 +74,32 @@ export interface Room {
   createdAt: number;
 }
 
-const rooms: Record<string, Room> = {};
+const ROOMS_DATA_FILE = join(__dirname, 'rooms.json');
+let rooms: Record<string, Room> = {};
+
+function loadRooms() {
+  try {
+    if (fs.existsSync(ROOMS_DATA_FILE)) {
+      const data = fs.readFileSync(ROOMS_DATA_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object') {
+        rooms = parsed;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+function saveRooms() {
+  try {
+    fs.writeFileSync(ROOMS_DATA_FILE, JSON.stringify(rooms, null, 2), 'utf-8');
+  } catch (e) {
+    // ignore
+  }
+}
+
+loadRooms();
 
 function shuffle<T>(array: T[]): T[] {
   const arr = [...array];
@@ -799,6 +824,77 @@ app.get('/api/school/analytics', (req: Request, res: Response) => {
   });
 });
 
+// -------------------------------------------------------------
+// TEST SESSIONS DATABASE (HISTORICAL LOGS FOR DEEP ANALYSIS)
+// -------------------------------------------------------------
+const TEST_DATA_FILE = join(__dirname, 'test_sessions.json');
+let inMemoryTestsCache: any[] = [];
+
+function loadTestSessions(): any[] {
+  if (inMemoryTestsCache.length > 0) return inMemoryTestsCache;
+  try {
+    if (fs.existsSync(TEST_DATA_FILE)) {
+      const data = fs.readFileSync(TEST_DATA_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        inMemoryTestsCache = parsed;
+        return inMemoryTestsCache;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to read test_sessions.json:', e);
+  }
+  return inMemoryTestsCache;
+}
+
+function saveTestSessions(list: any[]) {
+  inMemoryTestsCache = list;
+  try {
+    fs.writeFileSync(TEST_DATA_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Filesystem read-only (e.g. Vercel), cached in memory:', e);
+  }
+}
+
+// 8. Get test sessions database
+app.get('/api/school/tests', (req: Request, res: Response) => {
+  const tests = loadTestSessions();
+  res.json({ tests });
+});
+
+// 9. Record a test session into the database
+app.post('/api/school/tests', (req: Request, res: Response) => {
+  const { test } = req.body;
+  if (!test || !test.id) {
+    res.status(400).json({ error: 'بيانات الاختبار غير مكتملة' });
+    return;
+  }
+  const current = loadTestSessions();
+  const existingIdx = current.findIndex(t => t.id === test.id);
+  if (existingIdx >= 0) {
+    current[existingIdx] = test;
+  } else {
+    current.unshift(test); // newest first
+  }
+  saveTestSessions(current);
+  res.json({ success: true, count: current.length, tests: current });
+});
+
+// 10. Delete a test session
+app.delete('/api/school/tests/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const current = loadTestSessions();
+  const filtered = current.filter(t => t.id !== id);
+  saveTestSessions(filtered);
+  res.json({ success: true, count: filtered.length });
+});
+
+// 11. Clear test sessions
+app.delete('/api/school/tests', (req: Request, res: Response) => {
+  saveTestSessions([]);
+  res.json({ success: true, count: 0 });
+});
+
 // Serve web app only in standalone / local server (not inside Vercel serverless functions)
 if (!process.env.VERCEL) {
   if (process.env.NODE_ENV === 'production') {
@@ -828,9 +924,16 @@ if (!process.env.VERCEL) {
   }
 }
 
-const port = process.env.PORT || 3000;
+// Determine port: In AI Studio and Cloud Run, Nginx binds 8080 and proxies to port 3000.
+// Dev server must always bind to 3000 (never 8080) to avoid EADDRINUSE.
+const args = process.argv.slice(2);
+const portArgIndex = args.indexOf('--port');
+const portFromArgs = portArgIndex !== -1 && args[portArgIndex + 1] ? parseInt(args[portArgIndex + 1], 10) : null;
+const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+const port = portFromArgs || (envPort && envPort !== 8080 ? envPort : 3000);
+
 if (!process.env.VERCEL) {
-  app.listen(port, () => {
+  app.listen(port, '0.0.0.0', () => {
     console.log(`Server running on port ${port}`);
   });
 }

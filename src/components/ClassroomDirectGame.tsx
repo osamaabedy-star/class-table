@@ -25,7 +25,9 @@ import {
   Minimize2,
   Flame,
   Sparkles,
-  Swords
+  Swords,
+  Database,
+  FileDown
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { sounds } from '../utils/audio';
@@ -39,6 +41,12 @@ import {
   recordGameParticipation,
   fetchSchoolStudentsFromServer 
 } from '../data/students';
+import { 
+  recordTestSessionToDatabase, 
+  fetchTestSessionsFromServer, 
+  TestSessionRecord, 
+  exportTestDatabaseToExcel 
+} from '../data/testDatabase';
 import { RiyadhEbdaaLogo } from './RiyadhEbdaaLogo';
 import { RouletteWheelModal } from './RouletteWheelModal';
 import { exportResultsToExcel } from '../utils/exportExcel';
@@ -100,6 +108,21 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
 
   // Selected students mapping
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+
+  // Test Database States (for subsequent analysis)
+  const [isDatabaseModalOpen, setIsDatabaseModalOpen] = useState<boolean>(false);
+  const [savedTestsList, setSavedTestsList] = useState<TestSessionRecord[]>([]);
+  const [selectedTestDetail, setSelectedTestDetail] = useState<TestSessionRecord | null>(null);
+
+  const loadTests = () => {
+    fetchTestSessionsFromServer().then(tests => {
+      if (tests) setSavedTestsList(tests);
+    });
+  };
+
+  useEffect(() => {
+    loadTests();
+  }, [isDatabaseModalOpen]);
 
   // Upload/Paste Roster Modal State
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
@@ -449,6 +472,42 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       streak: a.correctAnswers
     })));
 
+    // Record complete test session to test database for deep analysis
+    try {
+      const totalCorrect = activeStudents.reduce((acc, s) => acc + s.correctAnswers, 0);
+      const totalAns = activeStudents.reduce((acc, s) => acc + s.totalAnswered, 0);
+      const avgAccuracy = totalAns > 0 ? Math.round((totalCorrect / totalAns) * 100) : 0;
+      const topStd = rankedActiveStudents[0];
+
+      recordTestSessionToDatabase({
+        title: `اختبار ${SCHOOL_GRADES.find(g => g.id === selectedGradeId)?.name || 'الصف'} (${selectedSection === 'all' ? 'جميع الشعب' : `شعبة ${selectedSection}`})`,
+        gradeId: selectedGradeId,
+        gradeName: SCHOOL_GRADES.find(g => g.id === selectedGradeId)?.name || 'الصف الدراسي',
+        section: selectedSection === 'all' ? 'جميع الشعب' : selectedSection,
+        tables: [...selectedTables],
+        opMode,
+        timeLimit,
+        roundsPerStudent,
+        competitionType,
+        totalParticipants: activeStudents.length,
+        averageAccuracy: avgAccuracy,
+        topStudentName: topStd?.name || '—',
+        topStudentScore: topStd?.score || 0,
+        participants: rankedActiveStudents.map((s, idx) => ({
+          id: s.id,
+          name: s.name,
+          score: s.score,
+          correctAnswers: s.correctAnswers,
+          totalAnswered: s.totalAnswered,
+          percentage: s.percentage,
+          rank: idx + 1,
+          eliminated: s.eliminated
+        }))
+      });
+    } catch (e) {
+      console.warn('Failed to save test session to database:', e);
+    }
+
     sounds.playFanfare();
     confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
     setGameState('finished');
@@ -544,6 +603,17 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {gameState === 'setup' && (
+            <button
+              onClick={() => { sounds.playTap(); setIsDatabaseModalOpen(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-black border border-amber-500/30 transition-all shadow-sm"
+              title="عرض قاعدة بيانات الاختبارات السابقة والتحليلات"
+            >
+              <Database className="w-3.5 h-3.5 text-amber-400" />
+              <span>قاعدة البيانات 💾</span>
+            </button>
+          )}
+
           {(gameState === 'playing' || gameState === 'intermission') && (
             <button
               onClick={() => setIsProjectorMode(!isProjectorMode)}
@@ -575,291 +645,249 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
         {/* SETUP SCREEN */}
         {gameState === 'setup' && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.98 }}
+            initial={{ opacity: 0, scale: 0.99 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-xl space-y-4"
+            className="w-full space-y-3"
           >
-            {/* Top Bar with Single Upload Button */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            {/* Top Bar with quick actions */}
+            <div className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-2 shadow-md">
               <div className="flex items-center gap-2">
                 <GraduationCap className="w-5 h-5 text-amber-400" />
-                <h2 className="text-sm sm:text-base font-black text-white leading-tight">
-                  إعداد مسابقة السبورة التفاعلية
+                <h2 className="text-sm sm:text-base font-black text-white">
+                  إعداد الاختبار ومسابقة السبورة
                 </h2>
+                <span className="text-[11px] text-slate-400 font-bold hidden sm:inline">
+                  • اختر الطلاب من القائمة يميناً وجهّز معايير الاختبار
+                </span>
               </div>
 
-              {/* Upload Button in the TOP BAR ONLY (No duplicates anywhere else) */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setIsUploadModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all hover:scale-[1.02]"
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-black flex items-center gap-1.5 transition-all"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>رفع / لصق أسماء الطلاب</span>
+                  <span>رفع ولصق أسماء</span>
                 </button>
 
-                {studentsList.length > 0 && (
-                  <button
-                    onClick={handleClearAllStudents}
-                    className="p-1.5 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 text-xs transition-colors"
-                    title="مسح جميع الطلاب المسجلين"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
+                <button
+                  onClick={() => setIsDatabaseModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-black flex items-center gap-1.5 transition-all"
+                >
+                  <Database className="w-3.5 h-3.5 text-amber-400" />
+                  <span>سجل الاختبارات 💾</span>
+                </button>
               </div>
             </div>
 
-            {/* 1. Grade & Section Selection Toolbar */}
-            <div className="space-y-2 bg-slate-950/60 p-3 rounded-2xl border border-slate-800/80">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-xs font-black text-amber-400 shrink-0">
-                  ١. الصف الدراسي:
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 flex-1 max-w-2xl">
-                  {SCHOOL_GRADES.map(grade => (
-                    <button
-                      key={grade.id}
-                      onClick={() => { sounds.playTap(); setSelectedGradeId(grade.id); }}
-                      className={`py-1.5 px-2.5 rounded-xl text-xs font-black transition-all border ${
-                        selectedGradeId === grade.id
-                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
-                          : 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:bg-slate-800'
-                      }`}
-                    >
-                      {grade.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
-                <span className="text-xs font-black text-indigo-400 shrink-0">
-                  ٢. اختيار الفصل:
-                </span>
-                <div className="flex flex-wrap items-center gap-1.5 flex-1">
-                  {['all', 'أ', 'ب', 'ج', 'د'].map(sec => (
-                    <button
-                      key={sec}
-                      onClick={() => { sounds.playTap(); setSelectedSection(sec); }}
-                      className={`px-3 py-1 rounded-xl text-xs font-black transition-all border ${
-                        selectedSection === sec
-                          ? 'bg-indigo-600 border-indigo-400 text-white shadow-sm'
-                          : 'bg-slate-800/70 border-slate-700/70 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {sec === 'all' ? 'جميع الفصول' : `فصل (${sec})`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* 2. TWO-COLUMN LAYOUT: RIGHT COLUMN FOR STUDENT NAMES LIST, LEFT COLUMN FOR SETTINGS & LAUNCH */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start pt-1">
-              {/* RIGHT COLUMN (الجانب الأيمن): ALL STUDENT NAMES IN ONE LIST WITH LAST ACTIVE PARTICIPATION DAY */}
-              <div className="lg:col-span-7 xl:col-span-7 space-y-2.5 bg-slate-950/40 p-3 sm:p-4 rounded-2xl border border-slate-800">
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
-                  <div className="flex items-center gap-2">
+            {/* MAIN 2-COLUMN LAYOUT:
+                RIGHT: Clean, simple-width student list (قائمة عرضها بسيط ناحية اليمين)
+                LEFT: Full remaining space dedicated to test setup (وباقي المساحة لاعداد الاختبار) */}
+            <div className="flex flex-col lg:flex-row gap-3.5 items-start">
+              
+              {/* 1. RIGHT SIDEBAR: SIMPLE, CLEAN STUDENT LIST */}
+              <div className="w-full lg:w-72 xl:w-80 shrink-0 bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-3.5 space-y-2.5 shadow-xl">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                  <div className="flex items-center gap-1.5">
                     <Users className="w-4 h-4 text-amber-400" />
-                    <h3 className="text-xs sm:text-sm font-black text-white">
-                      أسماء طلاب الفصل ({toHindi(visibleStudents.length)} طالب)
+                    <h3 className="text-xs font-black text-white">
+                      قائمة الطلاب ({toHindi(visibleStudents.length)})
                     </h3>
                   </div>
 
-                  <span className="text-xs text-amber-400 font-mono font-black bg-amber-400/10 px-2 py-0.5 rounded-lg border border-amber-400/20">
+                  <span className="text-[11px] font-mono font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
                     {toHindi(selectedStudentIds.size)} محدد
                   </span>
                 </div>
 
                 {/* Quick Selection Buttons */}
-                <div className="flex flex-wrap items-center justify-between gap-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={selectAllVisible}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-colors"
-                    >
-                      تحديد الكل
-                    </button>
-                    <button
-                      onClick={clearVisibleSelection}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-red-400 text-xs font-bold border border-slate-700 transition-colors"
-                    >
-                      إلغاء التحديد
-                    </button>
-                    <button
-                      onClick={() => selectRandomVisible(6)}
-                      className="px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-bold border border-indigo-500/30 flex items-center gap-1 transition-colors"
-                    >
-                      <Shuffle className="w-3 h-3" />
-                      <span>عشوائي (٦)</span>
-                    </button>
-                    <button
-                      onClick={() => { sounds.playTap(); setIsRouletteOpen(true); }}
-                      disabled={visibleStudents.length === 0}
-                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 text-amber-300 text-xs font-black border border-amber-500/40 flex items-center gap-1 transition-all disabled:opacity-40"
-                    >
-                      <span>عجلة الحظ 🎡</span>
-                    </button>
-                  </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={selectAllVisible}
+                    className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition-colors"
+                  >
+                    تحديد الكل
+                  </button>
+                  <button
+                    onClick={clearVisibleSelection}
+                    className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-red-400 text-[11px] font-bold transition-colors"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    onClick={() => selectRandomVisible(6)}
+                    className="flex-1 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    <span>(٦)</span>
+                  </button>
+                  <button
+                    onClick={() => { sounds.playTap(); setIsRouletteOpen(true); }}
+                    disabled={visibleStudents.length === 0}
+                    className="py-1 px-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-bold disabled:opacity-40 transition-colors"
+                    title="عجلة الحظ"
+                  >
+                    🎡
+                  </button>
                 </div>
 
-                {/* Search & Quick Single Add Bar */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
-                    <input
-                      type="text"
-                      placeholder="بحث في الأسماء..."
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl pr-8 pl-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-400"
-                    />
-                  </div>
-
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      placeholder="إضافة طالب..."
-                      value={singleStudentName}
-                      onChange={e => setSingleStudentName(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleAddSingleStudent()}
-                      className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-400"
-                    />
-                    <button
-                      onClick={handleAddSingleStudent}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold border border-slate-700 flex items-center gap-1"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>إضافة</span>
-                    </button>
-                  </div>
+                {/* Search */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="بحث سريع بالاسم..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-7 pl-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-400 placeholder:text-slate-500"
+                  />
                 </div>
 
-                {/* 3. THE UNIFIED STUDENTS LIST IN ONE SINGLE VERTICAL SCROLLABLE LIST WITH LAST PARTICIPATION DAY */}
-                <div className="space-y-1">
+                {/* Clean, minimalist student list */}
+                <div className="space-y-1 max-h-[460px] overflow-y-auto p-1 bg-slate-950/70 rounded-xl border border-slate-800/80 custom-scrollbar">
                   {visibleStudents.length === 0 ? (
-                    <div className="py-8 text-center bg-slate-900/60 rounded-xl border border-slate-800/80 p-4">
-                      <p className="text-xs text-slate-400 font-bold">
-                        لا توجد أسماء مسجلة
-                      </p>
+                    <div className="py-8 text-center text-xs text-slate-500 font-bold">
+                      لا يوجد طلاب مسجلون في هذا الصف
                     </div>
                   ) : (
-                    <div className="space-y-1.5 max-h-[460px] overflow-y-auto p-1 pr-1.5 bg-slate-900/70 rounded-xl border border-slate-800 custom-scrollbar">
-                      {visibleStudents.map(student => {
-                        const isSelected = selectedStudentIds.has(student.id);
-
-                        // Format last participation badge
-                        let lastActiveBadge = null;
-                        const lastDate = student.lastActiveDate?.trim();
-                        if (lastDate === 'اليوم') {
-                          lastActiveBadge = (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
-                              🟢 آخر مشاركة: اليوم
-                            </span>
-                          );
-                        } else if (lastDate === 'أمس') {
-                          lastActiveBadge = (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 shrink-0">
-                              🔵 آخر مشاركة: أمس
-                            </span>
-                          );
-                        } else if (!lastDate || lastDate === 'لم يشارك' || lastDate === 'جديد') {
-                          lastActiveBadge = (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30 shrink-0">
-                              ⭐ لم يشارك بعد
-                            </span>
-                          );
-                        } else {
-                          lastActiveBadge = (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
-                              📅 آخر مشاركة: {lastDate}
-                            </span>
-                          );
-                        }
-
-                        return (
-                          <div
-                            key={student.id}
-                            onClick={() => toggleStudentSelection(student.id)}
-                            className={`p-2.5 rounded-xl cursor-pointer text-right flex items-center justify-between gap-2 transition-all border ${
-                              isSelected
-                                ? 'bg-amber-500/15 border-amber-400/90 text-white shadow-sm ring-1 ring-amber-400/30'
-                                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
-                            }`}
-                          >
-                            {/* Checkbox and Name */}
-                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                              <div className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 border transition-colors ${
-                                isSelected ? 'bg-amber-500 border-amber-400 text-slate-950' : 'border-slate-700 bg-slate-800'
-                              }`}>
-                                {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                              </div>
-
-                              <div className="min-w-0">
-                                <span className={`text-xs sm:text-sm font-black truncate block ${
-                                  isSelected ? 'text-amber-300' : 'text-white'
-                                }`}>
-                                  {student.name}
-                                </span>
-                                <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-0.5">
-                                  <span>فصل ({student.section || 'أ'})</span>
-                                  <span>•</span>
-                                  <span>⭐ م.{toHindi(student.level || 1)}</span>
-                                  <span>•</span>
-                                  <span>{toHindi(student.participationCount || 0)} مشاركات</span>
-                                </div>
-                              </div>
+                    visibleStudents.map(student => {
+                      const isSelected = selectedStudentIds.has(student.id);
+                      return (
+                        <div
+                          key={student.id}
+                          onClick={() => toggleStudentSelection(student.id)}
+                          className={`px-2.5 py-1.5 rounded-lg cursor-pointer flex items-center justify-between gap-2 transition-all border text-right ${
+                            isSelected
+                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-sm font-black'
+                              : 'bg-slate-900/60 border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 border ${
+                              isSelected ? 'bg-amber-500 border-amber-400 text-slate-950' : 'border-slate-700 bg-slate-800'
+                            }`}>
+                              {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                             </div>
-
-                            {/* Last Active Day Badge and Delete */}
-                            <div className="flex items-center gap-2 shrink-0">
-                              {lastActiveBadge}
-
-                              <button
-                                onClick={(e) => handleDeleteStudent(student.id, e)}
-                                className="p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                                title="حذف الطالب من القائمة"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
+                            <span className="text-xs truncate">{student.name}</span>
                           </div>
-                        );
-                      })}
-                    </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              فصل {student.section || 'أ'}
+                            </span>
+                            <button
+                              onClick={(e) => handleDeleteStudent(student.id, e)}
+                              className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                              title="حذف"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
+                </div>
+
+                {/* Add single student inline */}
+                <div className="pt-1 flex gap-1.5 border-t border-slate-800">
+                  <input
+                    type="text"
+                    placeholder="إضافة طالب سريعاً..."
+                    value={singleStudentName}
+                    onChange={e => setSingleStudentName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleAddSingleStudent()}
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-white outline-none focus:border-amber-400 placeholder:text-slate-500"
+                  />
+                  <button
+                    onClick={handleAddSingleStudent}
+                    disabled={!singleStudentName.trim()}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 text-xs font-black transition-colors"
+                  >
+                    +
+                  </button>
                 </div>
               </div>
 
-              {/* LEFT COLUMN (الجانب الأيسر): COMPETITION SETTINGS & LAUNCH BUTTON */}
-              <div className="lg:col-span-5 xl:col-span-5 space-y-3">
-                {/* 1. Multiplication Tables Selection */}
-                <div className="bg-slate-950/40 p-3 sm:p-4 rounded-2xl border border-slate-800 space-y-2">
+              {/* 2. MAIN AREA: TEST PREPARATION (وباقي المساحة لاعداد الاختبار) */}
+              <div className="flex-1 w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
+                
+                {/* 1. الصف والفصل */}
+                <div className="space-y-2 pb-3 border-b border-slate-800/80">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-white">
-                      الجداول:
+                    <span className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                      <span>١. الصف الدراسي والشعبة:</span>
                     </span>
-                    <button
-                      onClick={() => {
-                        sounds.playTap();
-                        setSelectedTables([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-                      }}
-                      className="text-[10px] text-amber-400 hover:underline font-bold"
-                    >
-                      تحديد الكل
-                    </button>
+                    <span className="text-[11px] text-slate-400 font-bold">
+                      {SCHOOL_GRADES.find(g => g.id === selectedGradeId)?.name} • {selectedSection === 'all' ? 'جميع الفصول' : `فصل (${selectedSection})`}
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-6 gap-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {SCHOOL_GRADES.map(grade => (
+                      <button
+                        key={grade.id}
+                        onClick={() => { sounds.playTap(); setSelectedGradeId(grade.id); }}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all border ${
+                          selectedGradeId === grade.id
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        {grade.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    {['all', 'أ', 'ب', 'ج', 'د'].map(sec => (
+                      <button
+                        key={sec}
+                        onClick={() => { sounds.playTap(); setSelectedSection(sec); }}
+                        className={`px-3 py-1 rounded-xl text-xs font-black transition-all border ${
+                          selectedSection === sec
+                            ? 'bg-indigo-600 border-indigo-400 text-white shadow-sm'
+                            : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {sec === 'all' ? 'جميع الفصول' : `فصل (${sec})`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. جداول الضرب والقسمة المختبرة */}
+                <div className="space-y-2 pb-3 border-b border-slate-800/80">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-amber-400">
+                      ٢. جداول الحساب المختبرة:
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { sounds.playTap(); setSelectedTables([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); }}
+                        className="text-[11px] text-amber-400 hover:underline font-bold"
+                      >
+                        تحديد الكل (٢-١٢)
+                      </button>
+                      <span className="text-slate-600">•</span>
+                      <button
+                        onClick={() => { sounds.playTap(); setSelectedTables([2, 3, 4, 5]); }}
+                        className="text-[11px] text-indigo-400 hover:underline font-bold"
+                      >
+                        الأساسية (٢-٥)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-6 sm:grid-cols-11 gap-1.5">
                     {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => (
                       <button
                         key={n}
                         onClick={() => { sounds.playTap(); toggleTable(n); }}
-                        className={`h-9 rounded-xl font-black text-xs border transition-all font-mono ${
+                        className={`h-10 rounded-xl font-black text-xs sm:text-sm border transition-all font-mono ${
                           selectedTables.includes(n)
                             ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
-                            : 'bg-slate-800/60 text-slate-400 border-slate-700/50 hover:bg-slate-800'
+                            : 'bg-slate-950/80 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-white'
                         }`}
                       >
                         {toHindi(n)}
@@ -868,24 +896,24 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   </div>
                 </div>
 
-                {/* 2. Operation Mode */}
-                <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-800 space-y-2">
-                  <span className="text-xs font-black text-white block">
-                    العملية:
+                {/* 3. نوع العمليات الحسابية */}
+                <div className="space-y-2 pb-3 border-b border-slate-800/80">
+                  <span className="text-xs font-black text-amber-400 block">
+                    ٣. نوع العمليات الحسابية:
                   </span>
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-3 gap-2">
                     {[
-                      { id: 'multi', label: 'ضرب (×)' },
-                      { id: 'divi', label: 'قسمة (÷)' },
-                      { id: 'mixed', label: 'مختلط' }
+                      { id: 'multi', label: 'الضرب فقط (×)' },
+                      { id: 'divi', label: 'القسمة فقط (÷)' },
+                      { id: 'mixed', label: 'مختلط (× و ÷)' }
                     ].map(m => (
                       <button
                         key={m.id}
                         onClick={() => { sounds.playTap(); setOpMode(m.id as any); }}
-                        className={`py-2 px-1.5 rounded-xl text-xs font-black transition-all border text-center ${
+                        className={`py-2.5 px-2 rounded-xl text-xs font-black transition-all border text-center ${
                           opMode === m.id
                             ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
-                            : 'bg-slate-800/70 border-slate-700 text-slate-400 hover:text-white'
+                            : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
                         }`}
                       >
                         {m.label}
@@ -894,62 +922,47 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   </div>
                 </div>
 
-                {/* 2b. Competition System: Standard Points vs Sudden Death + Adaptive Difficulty */}
-                <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-800 space-y-2">
-                  <span className="text-xs font-black text-white block">
-                    النظام:
-                  </span>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      onClick={() => { sounds.playTap(); setCompetitionType('points'); }}
-                      className={`py-2 px-2 rounded-xl text-xs font-black border text-center transition-all ${
-                        competitionType === 'points'
-                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
-                          : 'bg-slate-800/70 border-slate-700 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      نقاط تراكمية 🏆
-                    </button>
-                    <button
-                      onClick={() => { sounds.playTap(); setCompetitionType('sudden_death'); }}
-                      className={`py-2 px-2 rounded-xl text-xs font-black border text-center transition-all ${
-                        competitionType === 'sudden_death'
-                          ? 'bg-red-600 text-white border-red-400 shadow-sm'
-                          : 'bg-slate-800/70 border-slate-700 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      خروج المغلوب ⚔️
-                    </button>
+                {/* 4. معايير ونظام الاختبار (الأسئلة، الوقت، نظام التنافس) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pb-2">
+                  {/* نوع التنافس */}
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="text-[11px] font-bold text-slate-400 block">نظام المسابقة:</span>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        onClick={() => { sounds.playTap(); setCompetitionType('points'); }}
+                        className={`py-1.5 rounded-lg text-xs font-black border transition-all ${
+                          competitionType === 'points'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        نقاط 🏆
+                      </button>
+                      <button
+                        onClick={() => { sounds.playTap(); setCompetitionType('sudden_death'); }}
+                        className={`py-1.5 rounded-lg text-xs font-black border transition-all ${
+                          competitionType === 'sudden_death'
+                            ? 'bg-red-600 text-white border-red-400'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        خروج مغلوب ⚔️
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="pt-1.5 flex items-center justify-between border-t border-slate-800/70">
-                    <span className="text-[11px] font-bold text-slate-300">التدرج الذكي:</span>
-                    <button
-                      onClick={() => { sounds.playTap(); setAdaptiveDifficulty(!adaptiveDifficulty); }}
-                      className={`px-3 py-1 rounded-xl text-xs font-black border transition-all ${
-                        adaptiveDifficulty
-                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
-                          : 'bg-slate-800/80 text-slate-500 border-slate-700'
-                      }`}
-                    >
-                      {adaptiveDifficulty ? 'مفعل ⚡' : 'معطل'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 3. Settings Bar: Rounds & Time Limit */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-slate-950/40 p-2.5 rounded-2xl border border-slate-800 space-y-1">
-                    <span className="text-slate-400 font-bold text-[11px] block">الأسئلة:</span>
-                    <div className="flex items-center gap-1">
+                  {/* عدد الأسئلة */}
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="text-[11px] font-bold text-slate-400 block">الأسئلة لكل طالب:</span>
+                    <div className="grid grid-cols-4 gap-1">
                       {[1, 2, 3, 5].map(cnt => (
                         <button
                           key={cnt}
                           onClick={() => { sounds.playTap(); setRoundsPerStudent(cnt); }}
-                          className={`flex-1 py-1 rounded-lg text-xs font-black font-mono border transition-all ${
+                          className={`py-1.5 rounded-lg text-xs font-black font-mono border transition-all ${
                             roundsPerStudent === cnt
                               ? 'bg-amber-500 text-slate-950 border-amber-400'
-                              : 'bg-slate-800 text-slate-400 border-slate-700'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                           }`}
                         >
                           {toHindi(cnt)}
@@ -958,17 +971,18 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                     </div>
                   </div>
 
-                  <div className="bg-slate-950/40 p-2.5 rounded-2xl border border-slate-800 space-y-1">
-                    <span className="text-slate-400 font-bold text-[11px] block">الوقت:</span>
-                    <div className="flex items-center gap-1">
+                  {/* وقت الإجابة */}
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="text-[11px] font-bold text-slate-400 block">وقت السؤال:</span>
+                    <div className="grid grid-cols-4 gap-1">
                       {[5, 10, 15, 20].map(sec => (
                         <button
                           key={sec}
                           onClick={() => { sounds.playTap(); setTimeLimit(sec); }}
-                          className={`flex-1 py-1 rounded-lg text-xs font-black font-mono border transition-all ${
+                          className={`py-1.5 rounded-lg text-xs font-black font-mono border transition-all ${
                             timeLimit === sec
                               ? 'bg-amber-500 text-slate-950 border-amber-400'
-                              : 'bg-slate-800 text-slate-400 border-slate-700'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                           }`}
                         >
                           {toHindi(sec)}ث
@@ -978,28 +992,35 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   </div>
                 </div>
 
-                {/* 4. Selected Summary Box */}
-                <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-amber-500/10 border border-slate-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-slate-400 font-bold block">الفصل المحدد للمسابقة:</span>
-                    <span className="text-xs font-black text-white">
-                      {SCHOOL_GRADES.find(g => g.id === selectedGradeId)?.name} • {selectedSection === 'all' ? 'جميع الفصول' : `فصل (${selectedSection})`}
-                    </span>
+                {/* 5. شريط تأكيد قاعدة البيانات وملخص الاختبار */}
+                <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-amber-500/10 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-right">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <span className="text-xs font-black text-white block">
+                        قاعدة بيانات التحليل التلقائي مفعّلة 💾
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        سيتم تسجيل درجات ونسب إتقان جميع المتسابقين في قاعدة البيانات للتحليل والمقارنة
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-left font-mono">
-                    <span className="text-base font-black text-amber-400 block">{toHindi(selectedStudentIds.size)}</span>
-                    <span className="text-[10px] text-slate-400">طلاب جاهزون</span>
+
+                  <div className="text-left font-mono shrink-0">
+                    <span className="text-sm font-black text-amber-400">
+                      {toHindi(selectedStudentIds.size)} طلاب جاهزون
+                    </span>
                   </div>
                 </div>
 
-                {/* Launch Button */}
+                {/* 6. زر البدء الرئيسي الكبير */}
                 <button
                   onClick={startClassCompetition}
                   disabled={selectedStudentIds.size === 0}
-                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 disabled:opacity-30 disabled:pointer-events-none text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-amber-500/25 transition-all hover:scale-[1.01] flex items-center justify-center gap-2"
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 disabled:opacity-30 disabled:pointer-events-none text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-amber-500/20 transition-all hover:scale-[1.01] flex items-center justify-center gap-2"
                 >
                   <Play className="w-5 h-5 fill-current" />
-                  <span>بدء مسابقة السبورة ({toHindi(selectedStudentIds.size)} طلاب)</span>
+                  <span>بدء الاختبار والمسابقة الآن ({toHindi(selectedStudentIds.size)} طلاب)</span>
                 </button>
               </div>
             </div>
@@ -1138,7 +1159,11 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                 <motion.div
                   initial={{ scale: 0.95, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  className="flex-1 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col items-center justify-center text-center space-y-3"
+                  className={`flex-1 p-5 rounded-2xl shadow-xl flex flex-col items-center justify-center text-center space-y-3 border-2 ${
+                    lastCorrect
+                      ? 'bg-slate-900 border-emerald-500/40'
+                      : 'bg-red-950/60 border-red-500 animate-pulse'
+                  }`}
                 >
                   <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center shadow-md border-2">
                     {lastCorrect ? (
@@ -1405,13 +1430,195 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
         )}
       </AnimatePresence>
 
+      {/* TEST SESSIONS DATABASE MODAL */}
+      <AnimatePresence>
+        {isDatabaseModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 dir-rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl max-h-[88vh] flex flex-col justify-between space-y-4"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white">
+                      قاعدة بيانات الاختبارات والمسابقات
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      سجل موثق لجميع الاختبارات المنجزة لغرض التحليل ومتابعة إتقان الطلاب
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {savedTestsList.length > 0 && (
+                    <button
+                      onClick={() => exportTestDatabaseToExcel(savedTestsList)}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all"
+                    >
+                      <FileSpreadsheet className="w-4 h-4" />
+                      <span>تصدير Excel 📊</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setIsDatabaseModalOpen(false); setSelectedTestDetail(null); }}
+                    className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                {selectedTestDetail ? (
+                  /* Detail View of a specific test */
+                  <div className="space-y-3">
+                    <button
+                      onClick={() => setSelectedTestDetail(null)}
+                      className="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 mb-2"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>العودة لسجل الاختبارات</span>
+                    </button>
+
+                    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2 text-right">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                        <div>
+                          <h4 className="text-sm font-black text-white">{selectedTestDetail.title}</h4>
+                          <span className="text-[11px] text-slate-400 font-mono">{selectedTestDetail.dateFormatted}</span>
+                        </div>
+                        <span className="text-xs font-bold font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                          متوسط الدقة: {toHindi(selectedTestDetail.averageAccuracy)}٪
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
+                        <div className="bg-slate-900 p-2 rounded-xl">
+                          <span className="text-[10px] text-slate-400 block">الجداول المختبرة</span>
+                          <span className="font-bold text-white">{selectedTestDetail.tables.map(t => toHindi(t)).join('، ')}</span>
+                        </div>
+                        <div className="bg-slate-900 p-2 rounded-xl">
+                          <span className="text-[10px] text-slate-400 block">نوع العملية</span>
+                          <span className="font-bold text-white">
+                            {selectedTestDetail.opMode === 'multi' ? 'ضرب' : selectedTestDetail.opMode === 'divi' ? 'قسمة' : 'مختلط'}
+                          </span>
+                        </div>
+                        <div className="bg-slate-900 p-2 rounded-xl">
+                          <span className="text-[10px] text-slate-400 block">فارس الاختبار</span>
+                          <span className="font-bold text-amber-400">{selectedTestDetail.topStudentName}</span>
+                        </div>
+                        <div className="bg-slate-900 p-2 rounded-xl">
+                          <span className="text-[10px] text-slate-400 block">المشاركون</span>
+                          <span className="font-bold text-indigo-400">{toHindi(selectedTestDetail.totalParticipants)} طالب</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Participant table */}
+                    <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-900 border-b border-slate-800 text-[11px] text-slate-400 font-bold">
+                          <tr>
+                            <th className="py-2.5 px-3">الترتيب</th>
+                            <th className="py-2.5 px-3">اسم الطالب</th>
+                            <th className="py-2.5 px-3">الدرجة</th>
+                            <th className="py-2.5 px-3">الإجابات الصحيحة</th>
+                            <th className="py-2.5 px-3">نسبة الدقة</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 font-bold">
+                          {selectedTestDetail.participants.map((p, idx) => (
+                            <tr key={idx} className="hover:bg-slate-900/40">
+                              <td className="py-2.5 px-3 text-amber-400 font-mono">#{toHindi(p.rank)}</td>
+                              <td className="py-2.5 px-3 text-white">{p.name}</td>
+                              <td className="py-2.5 px-3 text-indigo-300 font-mono">{toHindi(p.score)}</td>
+                              <td className="py-2.5 px-3 text-slate-300 font-mono">{toHindi(p.correctAnswers)} / {toHindi(p.totalAnswered)}</td>
+                              <td className="py-2.5 px-3 text-emerald-400 font-mono">{toHindi(p.percentage)}٪</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : savedTestsList.length === 0 ? (
+                  <div className="py-12 text-center space-y-2">
+                    <Database className="w-10 h-10 text-slate-600 mx-auto" />
+                    <p className="text-sm text-slate-400 font-bold">لا توجد اختبارات مسجلة بعد في قاعدة البيانات</p>
+                    <p className="text-xs text-slate-500">
+                      عند إجراء أي اختبار سبورة تفاعلي، سيتم حفظ نتائجه تلقائياً هنا للتحليل الدقيق
+                    </p>
+                  </div>
+                ) : (
+                  /* List of all test sessions */
+                  <div className="space-y-2">
+                    {savedTestsList.map(test => (
+                      <div
+                        key={test.id}
+                        className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs sm:text-sm font-black text-white">{test.title}</span>
+                            <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                              فارس: {test.topStudentName}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 font-mono">
+                            <span>📅 {test.dateFormatted}</span>
+                            <span>•</span>
+                            <span>👥 {toHindi(test.totalParticipants)} طلاب</span>
+                            <span>•</span>
+                            <span className="text-emerald-400 font-bold">نسبة الدقة: {toHindi(test.averageAccuracy)}٪</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => setSelectedTestDetail(test)}
+                            className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-bold transition-colors"
+                          >
+                            عرض التفاصيل
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[11px] text-slate-500 font-bold">
+                <span>إجمالي الاختبارات المحفوظة: {toHindi(savedTestsList.length)}</span>
+                <button
+                  onClick={() => setIsDatabaseModalOpen(false)}
+                  className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* ROULETTE WHEEL MODAL */}
       <RouletteWheelModal
         isOpen={isRouletteOpen}
         onClose={() => setIsRouletteOpen(false)}
         students={visibleStudents}
-        onPickStudent={(chosen) => {
-          setSelectedStudentIds(prev => new Set(prev).add(chosen.id));
+        onPickStudents={(chosenList) => {
+          setSelectedStudentIds(prev => {
+            const next = new Set(prev);
+            chosenList.forEach(s => next.add(s.id));
+            return next;
+          });
         }}
       />
     </div>
