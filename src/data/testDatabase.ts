@@ -119,8 +119,10 @@ export async function recordTestSessionToDatabase(record: Omit<TestSessionRecord
   return fullRecord;
 }
 
+import { getAdminAuthHeaders } from '../utils/auth';
+
 /**
- * Delete a test session
+ * Delete a test session (Requires Admin Auth)
  */
 export async function deleteTestSessionFromDatabase(id: string): Promise<boolean> {
   const current = loadSavedTestSessions();
@@ -128,7 +130,10 @@ export async function deleteTestSessionFromDatabase(id: string): Promise<boolean
   saveTestSessions(filtered);
 
   try {
-    const res = await fetch(`/api/school/tests/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/school/tests/${id}`, { 
+      method: 'DELETE',
+      headers: getAdminAuthHeaders()
+    });
     return res.ok;
   } catch {
     return true;
@@ -136,12 +141,15 @@ export async function deleteTestSessionFromDatabase(id: string): Promise<boolean
 }
 
 /**
- * Clear test sessions
+ * Clear test sessions (Requires Admin Auth)
  */
 export async function clearTestDatabase(): Promise<boolean> {
   saveTestSessions([]);
   try {
-    const res = await fetch('/api/school/tests', { method: 'DELETE' });
+    const res = await fetch('/api/school/tests', { 
+      method: 'DELETE',
+      headers: getAdminAuthHeaders()
+    });
     return res.ok;
   } catch {
     return true;

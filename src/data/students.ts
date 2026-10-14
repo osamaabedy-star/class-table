@@ -58,6 +58,8 @@ export function saveStudentsList(students: SchoolStudent[]): void {
   }
 }
 
+import { getAdminAuthHeaders } from '../utils/auth';
+
 /**
  * Fetch students from server with local storage fallback
  */
@@ -78,14 +80,14 @@ export async function fetchSchoolStudentsFromServer(): Promise<SchoolStudent[]> 
 }
 
 /**
- * Sync students list to server
+ * Sync students list to server (Requires Admin Auth)
  */
 export async function syncStudentsListToServer(students: SchoolStudent[]): Promise<boolean> {
   saveStudentsList(students);
   try {
     const res = await fetch('/api/school/students/batch', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminAuthHeaders(),
       body: JSON.stringify({ students, mode: 'replace' })
     });
     return res.ok;

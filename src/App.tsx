@@ -625,11 +625,12 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  // Room polling
+  // Room polling (Role-aware to safeguard question answers)
   const fetchRoom = useCallback(async (id: string) => {
     if (!id) return;
     try {
-      const res = await fetch(`/api/rooms/${id}`);
+      const roleParam = isTeacher ? '?role=host' : '?role=student';
+      const res = await fetch(`/api/rooms/${id}${roleParam}`);
       if (res.ok) {
         const data: Room = await res.json();
         setRoom(data);
@@ -659,7 +660,7 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [view]);
+  }, [view, isTeacher]);
 
   useEffect(() => {
     if (roomId && (view === 'lobby' || view === 'leaderboard' || view === 'game')) {
@@ -1345,7 +1346,7 @@ export default function App() {
                   <span>
                     {answerResult?.isCorrect
                       ? `أحسنت! إجابة صحيحة (+${toHindi(answerResult.points)} نقطة) 🌟`
-                      : `إجابة خاطئة! الجواب الصحيح: ${toHindi(answerResult?.correctAnswer ?? currentQ.answer)}`}
+                      : `إجابة خاطئة! الجواب الصحيح: ${toHindi(answerResult?.correctAnswer ?? '')}`}
                   </span>
                 </div>
 
@@ -1363,7 +1364,7 @@ export default function App() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full pt-1">
               {currentQ.options.map((opt, i) => {
                 const isChosen = selectedOption === opt;
-                const isActualCorrect = opt === currentQ.answer;
+                const isActualCorrect = answerResult?.correctAnswer !== undefined && opt === answerResult.correctAnswer;
                 let style = 'bg-slate-800 border-slate-700 text-white hover:bg-slate-700';
 
                 if (hasAnsweredCurrent) {

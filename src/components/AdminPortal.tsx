@@ -56,6 +56,7 @@ import {
   deleteTestSessionFromDatabase
 } from '../data/testDatabase';
 import { sounds } from '../utils/audio';
+import { setAdminToken, clearAdminToken, getAdminToken, getAdminAuthHeaders } from '../utils/auth';
 
 interface AdminPortalProps {
   onBack: () => void;
@@ -66,11 +67,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onBack,
   onOpenCertificate
 }) => {
-  // Authentication State strictly locked to osamaabedy@gmail.com
+  // Authentication State via verified token
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    const isAuth = localStorage.getItem('riyadh_admin_auth') === 'true';
-    const email = localStorage.getItem('riyadh_admin_email');
-    return isAuth && email === 'osamaabedy@gmail.com';
+    return Boolean(getAdminToken());
   });
   const [emailInput, setEmailInput] = useState<string>('');
   const [passwordInput, setPasswordInput] = useState<string>('');
@@ -157,7 +156,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   }, [isAuthenticated, loadData]);
 
-  // Handle Strict Admin Login
+  // Handle Strict Admin Login via Server
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -165,37 +164,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const cleanEmail = emailInput.trim().toLowerCase();
     const cleanPass = passwordInput.trim();
 
-    // Verify authorized administrator: osamaabedy@gmail.com / 990001
-    const isAuthorized = cleanEmail === 'osamaabedy@gmail.com' && cleanPass === '990001';
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password: cleanPass })
+      });
+      const data = await res.json();
 
-    if (isAuthorized) {
-      setIsAuthenticated(true);
-      localStorage.setItem('riyadh_admin_auth', 'true');
-      localStorage.setItem('riyadh_admin_email', 'osamaabedy@gmail.com');
-      sounds.playSuccess();
-      try {
-        await fetch('/api/admin/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, password: cleanPass })
-        });
-      } catch {
-        // Local auth valid
-      }
-    } else {
-      if (cleanEmail !== 'osamaabedy@gmail.com') {
-        setLoginError('البريد الإلكتروني غير مصرح له بالدخول. هذه اللوحة مخصصة للأستاذ أسامة العابدي فقط');
+      if (res.ok && data.success && data.token) {
+        setIsAuthenticated(true);
+        setAdminToken(data.token, data.email || cleanEmail);
+        sounds.playSuccess();
+        showToast('تم تسجيل الدخول بنجاح');
       } else {
-        setLoginError('كلمة المرور غير صحيحة');
+        setLoginError(data.error || 'فشل تسجيل الدخول. تحقق من صحة البريد وكلمة المرور');
+        sounds.playWrong();
       }
+    } catch {
+      setLoginError('تعذر الاتصال بالخادم للتحقق من بيانات الدخول');
       sounds.playWrong();
     }
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
-    localStorage.removeItem('riyadh_admin_auth');
-    localStorage.removeItem('riyadh_admin_email');
+    clearAdminToken();
     setEmailInput('');
     setPasswordInput('');
     sounds.playTap();
@@ -214,6 +208,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     showToast('تم تصدير ملف الطلاب بنجاح');
   };
 
+  // Full Database Snapshot Backup (Students + Tests)
+  const handleDownloadFullBackup = async () => {
+    sounds.playTap();
+    try {
+      const res = await fetch('/api/admin/backup', {
+        headers: getAdminAuthHeaders()
+      });
+      if (res.ok) {
+        const backupData = await res.json();
+        const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute('href', dataStr);
+        downloadAnchor.setAttribute('download', `riyadh_full_database_backup_${new Date().toISOString().slice(0, 10)}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast('تم حفظ وتحميل النسخة الاحتياطية الشاملة بنجاح');
+        sounds.playSuccess();
+      } else {
+        showToast('تعذر إنشاء النسخة الاحتياطية من الخادم');
+      }
+    } catch {
+      showToast('خطأ أثناء تحميل النسخة الاحتياطية');
+    }
+  };
+
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -225,6 +245,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           setStudents(parsed);
           await syncStudentsListToServer(parsed);
           showToast(`تم استيراد ${parsed.length} طالب بنجاح`);
+          sounds.playSuccess();
+        } else if (parsed && Array.isArray(parsed.students)) {
+          // Full backup file detected
+          setStudents(parsed.students);
+          await syncStudentsListToServer(parsed.students);
+          showToast(`تمت استعادة ${parsed.students.length} طالب من النسخة الاحتياطية`);
           sounds.playSuccess();
         } else {
           showToast('ملف غير صالح');
@@ -288,7 +314,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const nextList = students.filter(s => s.id !== id);
     setStudents(nextList);
     try {
-      await fetch(`/api/school/students/${id}`, { method: 'DELETE' });
+      await fetch(`/api/school/students/${id}`, { 
+        method: 'DELETE',
+        headers: getAdminAuthHeaders()
+      });
       await syncStudentsListToServer(nextList);
       showToast(`تم حذف الطالب: ${name}`);
       sounds.playTap();
@@ -359,7 +388,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleClearAll = async () => {
     if (!confirm('تحذير: هل أنت متأكد من مسح جميع قوائم الطلاب بالكامل من المدرسة؟')) return;
     try {
-      await fetch('/api/school/students', { method: 'DELETE' });
+      await fetch('/api/school/students', { 
+        method: 'DELETE',
+        headers: getAdminAuthHeaders()
+      });
       setStudents([]);
       showToast('تم مسح جميع القوائم بنجاح');
       sounds.playTap();
@@ -420,7 +452,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     dir="ltr"
                     required
                     autoFocus
-                    placeholder="osamaabedy@gmail.com"
+                    placeholder="name@example.com"
                     value={emailInput}
                     onChange={e => setEmailInput(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs font-mono text-white outline-none focus:border-amber-400 transition-colors"
@@ -528,7 +560,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>osamaabedy@gmail.com</span>
+              <span>{localStorage.getItem('riyadh_admin_email') || 'المشرف العام'}</span>
             </div>
             <RiyadhEbdaaLogo size="xs" />
             <button
@@ -694,6 +726,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 >
                   <UserPlus className="w-3.5 h-3.5" />
                   <span>طالب جديد</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadFullBackup}
+                  className="px-2 py-1 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-200 font-bold text-xs flex items-center gap-1 shrink-0 border border-indigo-700/60"
+                  title="نسخ احتياطي شامل لبيانات المدرسة والاختبارات"
+                >
+                  <Database className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">نسخ احتياطي شامل</span>
                 </button>
 
                 <button

@@ -1,0 +1,132 @@
+[
+  {
+    "id": "test-1791964524739-fe4b",
+    "createdAt": 1791964524739,
+    "dateFormatted": "الأربعاء، ١٤ أكتوبر ٢٠٢٦، ١٠:٥٥ ص",
+    "title": "اختبار الصف الثالث الابتدائي (جميع الشعب)",
+    "gradeId": "grade3",
+    "gradeName": "الصف الثالث الابتدائي",
+    "section": "جميع الشعب",
+    "tables": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "opMode": "multi",
+    "timeLimit": 10,
+    "roundsPerStudent": 2,
+    "competitionType": "points",
+    "totalParticipants": 4,
+    "averageAccuracy": 50,
+    "topStudentName": "1",
+    "topStudentScore": 2,
+    "participants": [
+      {
+        "id": "std-1791964464207",
+        "name": "1",
+        "score": 2,
+        "correctAnswers": 2,
+        "totalAnswered": 2,
+        "percentage": 100,
+        "rank": 1,
+        "eliminated": false
+      },
+      {
+        "id": "std-1791964464607",
+        "name": "2",
+        "score": 1,
+        "correctAnswers": 1,
+        "totalAnswered": 2,
+        "percentage": 50,
+        "rank": 2,
+        "eliminated": false
+      },
+      {
+        "id": "std-1791964465343",
+        "name": "3",
+        "score": 1,
+        "correctAnswers": 1,
+        "totalAnswered": 2,
+        "percentage": 50,
+        "rank": 3,
+        "eliminated": false
+      },
+      {
+        "id": "std-1791964465951",
+        "name": "3",
+        "score": 0,
+        "correctAnswers": 0,
+        "totalAnswered": 2,
+        "percentage": 0,
+        "rank": 4,
+        "eliminated": false
+      }
+    ]
+  },
+  {
+    "id": "test-1791964277996-708q",
+    "createdAt": 1791964277996,
+    "dateFormatted": "الأربعاء، ١٤ أكتوبر ٢٠٢٦، ١٠:٥١ ص",
+    "title": "اختبار الصف الثالث الابتدائي (جميع الشعب)",
+    "gradeId": "grade3",
+    "gradeName": "الصف الثالث الابتدائي",
+    "section": "جميع الشعب",
+    "tables": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "opMode": "multi",
+    "timeLimit": 10,
+    "roundsPerStudent": 2,
+    "competitionType": "points",
+    "totalParticipants": 3,
+    "averageAccuracy": 50,
+    "topStudentName": "لسﻻ",
+    "topStudentScore": 1,
+    "participants": [
+      {
+        "id": "std-1791963875499",
+        "name": "لسﻻ",
+        "score": 1,
+        "correctAnswers": 1,
+        "totalAnswered": 1,
+        "percentage": 100,
+        "rank": 1,
+        "eliminated": false
+      },
+      {
+        "id": "std-1791963874477",
+        "name": "ابﻻل",
+        "score": 1,
+        "correctAnswers": 1,
+        "totalAnswered": 2,
+        "percentage": 50,
+        "rank": 2,
+        "eliminated": false
+      },
+      {
+        "id": "std-1791963876493",
+        "name": "سبلا",
+        "score": 0,
+        "correctAnswers": 0,
+        "totalAnswered": 1,
+        "percentage": 0,
+        "rank": 3,
+        "eliminated": false
+      }
+    ]
+  }
+]

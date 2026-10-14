@@ -4,11 +4,17 @@ import { dirname, join } from 'path';
 import fs from 'fs';
 import type { Request, Response } from 'express';
 
+import crypto from 'crypto';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
 app.use(express.json());
+
+// In-memory rate limiting and login attempt protection
+const loginAttempts = new Map<string, { count: number; lockedUntil: number }>();
+const activeAdminTokens = new Set<string>();
 
 // Enable CORS for all origins so external devices, phones, and friends can access without restriction
 app.use((req: Request, res: Response, next) => {
@@ -25,6 +31,39 @@ app.use((req: Request, res: Response, next) => {
   }
   next();
 });
+
+// Middleware: Verify Admin Authorization for sensitive mutations
+function requireAdminAuth(req: Request, res: Response, next: () => void) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'غير مصرح: يجب تسجيل الدخول كمسؤول للنظام للقيام بهذا الإجراء' });
+    return;
+  }
+  const token = authHeader.split(' ')[1];
+  if (!activeAdminTokens.has(token)) {
+    // Also allow token if matches HMAC of secret
+    const jwtSecret = process.env.JWT_SECRET || process.env.ADMIN_PASSWORD || 'riyadh_al_ebdaa_secret_key_2026';
+    try {
+      const [payloadBase64, sig] = token.split('.');
+      if (payloadBase64 && sig) {
+        const expectedSig = crypto.createHmac('sha256', jwtSecret).update(payloadBase64).digest('hex');
+        if (crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+          const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
+          if (payload && payload.exp && payload.exp > Date.now()) {
+            activeAdminTokens.add(token);
+            next();
+            return;
+          }
+        }
+      }
+    } catch {
+      // Invalid format
+    }
+    res.status(403).json({ error: 'انتهت صلاحية الجلسة أو الرمز غير صالح، يرجى تسجيل الدخول مجدداً' });
+    return;
+  }
+  next();
+}
 
 export interface Question {
   id: number;
@@ -74,28 +113,40 @@ export interface Room {
   createdAt: number;
 }
 
-const ROOMS_DATA_FILE = join(__dirname, 'rooms.json');
+// Room persistence across serverless container invocations via /tmp and workspace root
+const ROOMS_DATA_FILE = process.env.VERCEL ? '/tmp/riyadh_rooms.json' : join(__dirname, 'rooms.json');
 let rooms: Record<string, Room> = {};
 
-function loadRooms() {
+function loadRooms(): Record<string, Room> {
   try {
     if (fs.existsSync(ROOMS_DATA_FILE)) {
       const data = fs.readFileSync(ROOMS_DATA_FILE, 'utf-8');
       const parsed = JSON.parse(data);
       if (parsed && typeof parsed === 'object') {
-        rooms = parsed;
+        rooms = { ...rooms, ...parsed };
+      }
+    } else if (process.env.VERCEL) {
+      // In Vercel first load, try bundle fallback
+      const rootRoomsFile = join(__dirname, 'rooms.json');
+      if (fs.existsSync(rootRoomsFile)) {
+        const data = fs.readFileSync(rootRoomsFile, 'utf-8');
+        const parsed = JSON.parse(data);
+        if (parsed && typeof parsed === 'object') {
+          rooms = { ...rooms, ...parsed };
+        }
       }
     }
   } catch (e) {
     // ignore
   }
+  return rooms;
 }
 
 function saveRooms() {
   try {
     fs.writeFileSync(ROOMS_DATA_FILE, JSON.stringify(rooms, null, 2), 'utf-8');
   } catch (e) {
-    // ignore
+    // In read-only fallback, memory cache maintains state
   }
 }
 
@@ -305,6 +356,8 @@ app.post('/api/rooms', (req: Request, res: Response) => {
     createdAt: Date.now()
   };
 
+  saveRooms();
+
   res.json({ roomId, room: rooms[roomId] });
 });
 
@@ -332,7 +385,7 @@ app.get('/api/rooms', (req: Request, res: Response) => {
   res.json({ rooms: roomList });
 });
 
-// 2. Get room details (with auto-advancing check)
+// 2. Get room details (with auto-advancing check & security answer masking for students)
 app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const room = rooms[roomId.toUpperCase()];
@@ -341,6 +394,25 @@ app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
     return;
   }
   updateRoomState(room);
+
+  // If request contains role=student or no admin auth token, sanitize answers of questions
+  const isHost = req.query.role === 'host' || req.headers.authorization?.startsWith('Bearer ');
+  if (!isHost) {
+    const sanitizedQuestions = room.questions.map((q, idx) => {
+      // If question has passed or currently in intermission, student can see answer, otherwise hide it
+      const hasPassed = idx < room.currentQuestionIndex;
+      return {
+        ...q,
+        answer: hasPassed ? q.answer : 0 // Answer hidden until evaluated server-side
+      };
+    });
+    res.json({
+      ...room,
+      questions: sanitizedQuestions
+    });
+    return;
+  }
+
   res.json(room);
 });
 
@@ -383,6 +455,8 @@ app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
     room.questionStartedAt = Date.now();
   }
 
+  saveRooms();
+
   res.json({ success: true, room });
 });
 
@@ -397,6 +471,7 @@ app.post('/api/rooms/:roomId/start', (req: Request, res: Response) => {
   room.status = 'playing';
   room.currentQuestionIndex = 0;
   room.questionStartedAt = Date.now();
+  saveRooms();
   res.json({ success: true, room });
 });
 
@@ -450,6 +525,7 @@ app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
 
   // Trigger auto-advance check
   updateRoomState(room);
+  saveRooms();
 
   res.json({
     success: true,
@@ -468,6 +544,7 @@ app.post('/api/rooms/:roomId/end', (req: Request, res: Response) => {
   const room = rooms[roomId.toUpperCase()];
   if (room) {
     room.status = 'finished';
+    saveRooms();
   }
   res.json({ success: true, room });
 });
@@ -575,7 +652,7 @@ export interface SchoolStudent {
   bestStreak: number;
 }
 
-const SCHOOL_DATA_FILE = join(__dirname, 'school_students.json');
+const SCHOOL_DATA_FILE = process.env.VERCEL ? '/tmp/riyadh_school_students.json' : join(__dirname, 'school_students.json');
 let inMemoryStudentsCache: SchoolStudent[] = [];
 
 function loadSchoolStudents(): SchoolStudent[] {
@@ -587,6 +664,16 @@ function loadSchoolStudents(): SchoolStudent[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         inMemoryStudentsCache = parsed;
         return inMemoryStudentsCache;
+      }
+    } else if (process.env.VERCEL) {
+      const rootSchoolFile = join(__dirname, 'school_students.json');
+      if (fs.existsSync(rootSchoolFile)) {
+        const data = fs.readFileSync(rootSchoolFile, 'utf-8');
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          inMemoryStudentsCache = parsed;
+          return inMemoryStudentsCache;
+        }
       }
     }
   } catch (e) {
@@ -605,8 +692,20 @@ function saveSchoolStudents(list: SchoolStudent[]) {
   }
 }
 
-// Admin login verification endpoint
+// Admin login verification endpoint with brute-force rate limiting and cryptographically signed session tokens
 app.post('/api/admin/login', (req: Request, res: Response) => {
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const attempt = loginAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+
+  if (attempt.lockedUntil > now) {
+    const remainingSecs = Math.ceil((attempt.lockedUntil - now) / 1000);
+    res.status(429).json({
+      error: `تم تجاوز الحد المسموح من محاولات الدخول. يرجى الانتظار ${remainingSecs} ثانية قبل المحاولة مجدداً`
+    });
+    return;
+  }
+
   const { email, password } = req.body;
   const adminEmail = (process.env.ADMIN_EMAIL || 'osamaabedy@gmail.com').trim().toLowerCase();
   const adminPassword = (process.env.ADMIN_PASSWORD || '990001').trim();
@@ -614,10 +713,47 @@ app.post('/api/admin/login', (req: Request, res: Response) => {
   const userEmail = (email || '').trim().toLowerCase();
   const userPassword = (password || '').trim();
 
-  if (userEmail === adminEmail && userPassword === adminPassword) {
-    res.json({ success: true, email: adminEmail });
+  // Timing safe comparison to mitigate timing attacks
+  const emailMatch = userEmail === adminEmail;
+  const passBuf = Buffer.from(userPassword);
+  const targetBuf = Buffer.from(adminPassword);
+  const passMatch = passBuf.length === targetBuf.length && crypto.timingSafeEqual(passBuf, targetBuf);
+
+  if (emailMatch && passMatch) {
+    // Reset failed attempt counter on success
+    loginAttempts.delete(ip);
+
+    // Generate signed token valid for 7 days
+    const jwtSecret = process.env.JWT_SECRET || adminPassword || 'riyadh_al_ebdaa_secret_key_2026';
+    const payload = {
+      email: adminEmail,
+      role: 'admin',
+      exp: now + 7 * 24 * 60 * 60 * 1000,
+      iat: now
+    };
+    const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
+    const signature = crypto.createHmac('sha256', jwtSecret).update(payloadBase64).digest('hex');
+    const token = `${payloadBase64}.${signature}`;
+
+    activeAdminTokens.add(token);
+
+    res.json({
+      success: true,
+      email: adminEmail,
+      token,
+      expiresIn: 7 * 24 * 60 * 60
+    });
   } else {
-    res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة، الوصول مخصص للأستاذ أسامة العابدي فقط' });
+    attempt.count += 1;
+    if (attempt.count >= 5) {
+      attempt.lockedUntil = now + 5 * 60 * 1000; // Lock for 5 minutes after 5 failures
+      attempt.count = 0;
+    }
+    loginAttempts.set(ip, attempt);
+
+    res.status(401).json({
+      error: 'بيانات الدخول غير صحيحة. يرجى التأكد من البريد الإلكتروني وكلمة المرور'
+    });
   }
 });
 
@@ -627,8 +763,8 @@ app.get('/api/school/students', (req: Request, res: Response) => {
   res.json({ students });
 });
 
-// 2. Batch upload / replace students
-app.post('/api/school/students/batch', (req: Request, res: Response) => {
+// 2. Batch upload / replace students (Protected: Admin Auth Required)
+app.post('/api/school/students/batch', requireAdminAuth, (req: Request, res: Response) => {
   const { students, mode } = req.body;
   if (!Array.isArray(students)) {
     res.status(400).json({ error: 'قائمة الطلاب غير صالحة' });
@@ -651,8 +787,8 @@ app.post('/api/school/students/batch', (req: Request, res: Response) => {
   res.json({ success: true, count: current.length, students: current });
 });
 
-// 3. Add or update single student
-app.post('/api/school/students', (req: Request, res: Response) => {
+// 3. Add or update single student (Protected: Admin Auth Required)
+app.post('/api/school/students', requireAdminAuth, (req: Request, res: Response) => {
   const studentData: SchoolStudent = req.body;
   if (!studentData || !studentData.name) {
     res.status(400).json({ error: 'اسم الطالب مطلوب' });
@@ -679,8 +815,8 @@ app.post('/api/school/students', (req: Request, res: Response) => {
   res.json({ success: true, students: current });
 });
 
-// 4. Delete student
-app.delete('/api/school/students/:id', (req: Request, res: Response) => {
+// 4. Delete student (Protected: Admin Auth Required)
+app.delete('/api/school/students/:id', requireAdminAuth, (req: Request, res: Response) => {
   const { id } = req.params;
   const current = loadSchoolStudents();
   const filtered = current.filter(s => s.id !== id);
@@ -688,8 +824,8 @@ app.delete('/api/school/students/:id', (req: Request, res: Response) => {
   res.json({ success: true, count: filtered.length });
 });
 
-// 5. Clear all students
-app.delete('/api/school/students', (req: Request, res: Response) => {
+// 5. Clear all students (Protected: Admin Auth Required)
+app.delete('/api/school/students', requireAdminAuth, (req: Request, res: Response) => {
   saveSchoolStudents([]);
   res.json({ success: true, count: 0 });
 });
@@ -830,7 +966,7 @@ app.get('/api/school/analytics', (req: Request, res: Response) => {
 // -------------------------------------------------------------
 // TEST SESSIONS DATABASE (HISTORICAL LOGS FOR DEEP ANALYSIS)
 // -------------------------------------------------------------
-const TEST_DATA_FILE = join(__dirname, 'test_sessions.json');
+const TEST_DATA_FILE = process.env.VERCEL ? '/tmp/riyadh_test_sessions.json' : join(__dirname, 'test_sessions.json');
 let inMemoryTestsCache: any[] = [];
 
 function loadTestSessions(): any[] {
@@ -842,6 +978,16 @@ function loadTestSessions(): any[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         inMemoryTestsCache = parsed;
         return inMemoryTestsCache;
+      }
+    } else if (process.env.VERCEL) {
+      const rootTestFile = join(__dirname, 'test_sessions.json');
+      if (fs.existsSync(rootTestFile)) {
+        const data = fs.readFileSync(rootTestFile, 'utf-8');
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          inMemoryTestsCache = parsed;
+          return inMemoryTestsCache;
+        }
       }
     }
   } catch (e) {
@@ -883,8 +1029,8 @@ app.post('/api/school/tests', (req: Request, res: Response) => {
   res.json({ success: true, count: current.length, tests: current });
 });
 
-// 10. Delete a test session
-app.delete('/api/school/tests/:id', (req: Request, res: Response) => {
+// 10. Delete a test session (Protected: Admin Auth Required)
+app.delete('/api/school/tests/:id', requireAdminAuth, (req: Request, res: Response) => {
   const { id } = req.params;
   const current = loadTestSessions();
   const filtered = current.filter(t => t.id !== id);
@@ -892,10 +1038,54 @@ app.delete('/api/school/tests/:id', (req: Request, res: Response) => {
   res.json({ success: true, count: filtered.length });
 });
 
-// 11. Clear test sessions
-app.delete('/api/school/tests', (req: Request, res: Response) => {
+// 11. Clear test sessions (Protected: Admin Auth Required)
+app.delete('/api/school/tests', requireAdminAuth, (req: Request, res: Response) => {
   saveTestSessions([]);
   res.json({ success: true, count: 0 });
+});
+
+// 12. Create complete database backup (Protected: Admin Auth Required)
+app.get('/api/admin/backup', requireAdminAuth, (req: Request, res: Response) => {
+  const students = loadSchoolStudents();
+  const tests = loadTestSessions();
+  const activeRooms = Object.values(rooms).map(r => ({
+    id: r.id,
+    title: r.title,
+    createdAt: r.createdAt,
+    status: r.status
+  }));
+
+  res.json({
+    timestamp: Date.now(),
+    date: new Date().toISOString(),
+    school: 'مدارس رياض الإبداع',
+    counts: {
+      students: students.length,
+      tests: tests.length,
+      rooms: activeRooms.length
+    },
+    students,
+    tests
+  });
+});
+
+// 13. System Health & Storage Status (Protected: Admin Auth Required)
+app.get('/api/admin/health', requireAdminAuth, (req: Request, res: Response) => {
+  const students = loadSchoolStudents();
+  const tests = loadTestSessions();
+  res.json({
+    status: 'ok',
+    timestamp: Date.now(),
+    uptime: process.uptime(),
+    storage: {
+      type: 'hybrid-file-memory',
+      studentsCount: students.length,
+      testsCount: tests.length,
+      roomsCount: Object.keys(rooms).length
+    },
+    nodeEnv: process.env.NODE_ENV || 'development',
+    isVercel: Boolean(process.env.VERCEL)
+  });
 });
 
 // Serve web app only in standalone / local server (not inside Vercel serverless functions)

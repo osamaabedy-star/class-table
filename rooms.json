@@ -1,0 +1,94 @@
+{
+  "4ZF6": {
+    "id": "4ZF6",
+    "title": "تحدي جدول الضرب",
+    "roomType": "duel",
+    "status": "playing",
+    "config": {
+      "tables": [
+        7
+      ],
+      "questionsCount": 3,
+      "timePerQuestion": 10,
+      "mode": "multi"
+    },
+    "questions": [
+      {
+        "id": 1,
+        "a": 7,
+        "b": 9,
+        "operation": "×",
+        "answer": 63,
+        "options": [
+          65,
+          62,
+          61,
+          63
+        ],
+        "text": "7 × 9"
+      },
+      {
+        "id": 2,
+        "a": 7,
+        "b": 8,
+        "operation": "×",
+        "answer": 56,
+        "options": [
+          49,
+          56,
+          58,
+          48
+        ],
+        "text": "7 × 8"
+      },
+      {
+        "id": 3,
+        "a": 7,
+        "b": 11,
+        "operation": "×",
+        "answer": 77,
+        "options": [
+          88,
+          77,
+          84,
+          78
+        ],
+        "text": "7 × 11"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "questionStartedAt": 1791965845623,
+    "intermissionEndsAt": 0,
+    "students": {
+      "عمر التميمي": {
+        "name": "عمر التميمي",
+        "score": 0,
+        "currentIndex": 1,
+        "correctCount": 0,
+        "streak": 0,
+        "answers": [
+          {
+            "questionIndex": 0,
+            "selectedOption": 14,
+            "isCorrect": false,
+            "timeSpent": 2,
+            "pointsEarned": 0
+          }
+        ],
+        "lastActive": 1791965845627,
+        "completed": false
+      },
+      "سعد القحطاني": {
+        "name": "سعد القحطاني",
+        "score": 0,
+        "currentIndex": 0,
+        "correctCount": 0,
+        "streak": 0,
+        "answers": [],
+        "lastActive": 1791965845623,
+        "completed": false
+      }
+    },
+    "createdAt": 1791965845609
+  }
+}
