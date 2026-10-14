@@ -102,7 +102,7 @@ interface TeacherLiveGameDashboardProps {
   activeRoomsCount: number;
   onOpenActiveRooms: () => void;
   onEndGame: () => void;
-  onRoomUpdate?: (room: Room) => void;
+  onRoomUpdate?: (room: any) => void;
   showToast?: (msg: string) => void;
 }
 

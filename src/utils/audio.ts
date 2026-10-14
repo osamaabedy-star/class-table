@@ -100,6 +100,14 @@ class SoundEffectsManager {
     }
   }
 
+  playTick(_isCorrect?: boolean) {
+    this.playWheelTick();
+  }
+
+  playFanfare() {
+    this.playCorrect();
+  }
+
   // Play Arabic spoken praise using SpeechSynthesis with single clear words
   playPraiseVoice(isCorrect: boolean = true) {
     if (!isCorrect || !this.enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
