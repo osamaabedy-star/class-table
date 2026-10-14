@@ -424,8 +424,8 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       );
     }
 
-    setGameState('intermission');
     setIntermissionTimer(3);
+    setGameState('intermission');
   };
 
   // 3-second intermission countdown
@@ -435,11 +435,14 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
     if (intermissionTimer > 0) {
       const t = setTimeout(() => {
         sounds.playTick(false);
-        setIntermissionTimer(prev => prev - 1);
+        setIntermissionTimer(prev => Math.max(0, prev - 1));
       }, 1000);
       return () => clearTimeout(t);
     } else {
-      advanceNextTurn();
+      const t = setTimeout(() => {
+        advanceNextTurn();
+      }, 100);
+      return () => clearTimeout(t);
     }
   }, [intermissionTimer, gameState]);
 

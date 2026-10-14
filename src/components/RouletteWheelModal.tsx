@@ -1,12 +1,12 @@
 /**
  * Interactive Classroom Roulette Wheel Modal
- * Selects a specified number of students randomly with animation and sound effects
+ * Selects a specified number of students randomly, activates them for the active test, and plays sound effects
  * Riyadh Al-Ebdaa Schools
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Sparkles, Trophy, RotateCcw, Users } from 'lucide-react';
+import { X, Trophy, RotateCcw, Users, CheckCircle2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { SchoolStudent } from '../data/students';
 import { sounds } from '../utils/audio';
@@ -114,7 +114,7 @@ export const RouletteWheelModal: React.FC<RouletteWheelModalProps> = ({
     // Determine how many to pick (capped at pool length)
     const countToPick = Math.min(Math.max(1, targetCount), pool.length);
 
-    // Pick random unique winners
+    // Pick random unique winners from the actual class pool
     const shuffled = [...pool].sort(() => Math.random() - 0.5);
     const chosenList = shuffled.slice(0, countToPick);
     const primaryWinner = chosenList[0];
@@ -143,6 +143,8 @@ export const RouletteWheelModal: React.FC<RouletteWheelModalProps> = ({
       sounds.playFanfare();
       sounds.playPraiseVoice(true);
       confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 } });
+      
+      // Instantly activate these chosen students for the test
       onPickStudents(chosenList);
     }, 3200);
   };
@@ -159,7 +161,7 @@ export const RouletteWheelModal: React.FC<RouletteWheelModalProps> = ({
         <div className="flex items-center justify-between pb-2 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <span className="text-xl">🎡</span>
-            <h3 className="text-sm sm:text-base font-black text-white">عجلة الحظ والاختيار العشوائي</h3>
+            <h3 className="text-sm sm:text-base font-black text-white">عجلة الحظ واختيار طلاب المسابقة تلقائياً</h3>
           </div>
           <button
             onClick={onClose}
@@ -174,7 +176,7 @@ export const RouletteWheelModal: React.FC<RouletteWheelModalProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-xs font-black text-amber-400 flex items-center gap-1.5">
               <Users className="w-4 h-4" />
-              <span>حدد عدد الطلاب المراد اختيارهم عشوائياً:</span>
+              <span>حدد عدد الطلاب المطلوب اختيارهم للمسابقة:</span>
             </span>
             <span className="text-xs font-mono font-bold text-white bg-amber-500/20 px-2.5 py-0.5 rounded-lg border border-amber-500/30">
               {toHindi(targetCount)} طلاب
@@ -228,15 +230,15 @@ export const RouletteWheelModal: React.FC<RouletteWheelModalProps> = ({
               key="winners"
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="p-3 rounded-2xl bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-amber-500/20 border-2 border-amber-400 shadow-lg space-y-2"
+              className="p-3 rounded-2xl bg-gradient-to-r from-emerald-500/20 via-yellow-500/10 to-emerald-500/20 border-2 border-emerald-400 shadow-lg space-y-2"
             >
-              <div className="flex items-center justify-center gap-1.5 text-amber-400 text-xs font-black">
-                <Trophy className="w-4 h-4" />
-                <span>تم اختيار الأبطال بنجاح ({toHindi(winners.length)} طلاب)!</span>
+              <div className="flex items-center justify-center gap-1.5 text-emerald-400 text-xs font-black">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>تم اختيار الأبطال وتفعيلهم للمسابقة تلقائياً ({toHindi(winners.length)} طلاب)!</span>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-1.5">
                 {winners.map(w => (
-                  <span key={w.id} className="bg-amber-500 text-slate-950 font-black text-xs px-2.5 py-1 rounded-xl shadow">
+                  <span key={w.id} className="bg-emerald-500 text-slate-950 font-black text-xs px-2.5 py-1 rounded-xl shadow">
                     {w.name}
                   </span>
                 ))}
@@ -244,7 +246,7 @@ export const RouletteWheelModal: React.FC<RouletteWheelModalProps> = ({
             </motion.div>
           ) : (
             <div className="text-xs text-slate-400 font-bold py-1">
-              {spinning ? 'العجلة تدور لاختيار الأبطال...' : `اضغط للتدوير واختيار (${toHindi(targetCount)}) طلاب عشوائياً من إجمالي (${toHindi(pool.length)}) طالب`}
+              {spinning ? 'العجلة تدور لاختيار الأبطال...' : `اضغط للتدوير واختيار (${toHindi(targetCount)}) طلاب عشوائياً وتفعيلهم للمسابقة فوراً`}
             </div>
           )}
         </AnimatePresence>
@@ -257,13 +259,13 @@ export const RouletteWheelModal: React.FC<RouletteWheelModalProps> = ({
             className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 disabled:opacity-40 text-slate-950 font-black text-sm shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2"
           >
             <RotateCcw className={`w-4 h-4 ${spinning ? 'animate-spin' : ''}`} />
-            <span>{winners.length > 0 ? 'تدوير مرة أخرى 🎡' : `بدء اختيار (${toHindi(targetCount)}) عشوائياً 🎡`}</span>
+            <span>{winners.length > 0 ? 'تدوير مرة أخرى 🎡' : `تدوير واختيار (${toHindi(targetCount)}) طلاب للمسابقة 🎡`}</span>
           </button>
           <button
             onClick={onClose}
             className="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs"
           >
-            تم
+            تم وبدء الاختبار
           </button>
         </div>
       </motion.div>
