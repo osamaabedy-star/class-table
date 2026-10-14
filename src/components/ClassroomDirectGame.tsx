@@ -706,29 +706,33 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       <main className={`flex-1 flex flex-col items-center justify-center max-w-6xl mx-auto w-full ${
         gameState === 'playing' ? 'p-1.5 overflow-hidden' : 'p-3 md:p-5'
       }`}>
-        {/* SETUP SCREEN */}
+        {/* SETUP SCREEN: ELEGANT, UNCLUTTERED, PROFESSIONAL LAYOUT */}
         {gameState === 'setup' && (
           <motion.div
             initial={{ opacity: 0, scale: 0.99 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="w-full space-y-3"
+            className="w-full space-y-3.5"
           >
-            {/* Top Bar with quick actions */}
-            <div className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-2 shadow-md">
+            {/* Minimalist Header Bar */}
+            <div className="bg-slate-900/80 border border-slate-800/80 px-4 py-2 rounded-2xl flex flex-wrap items-center justify-between gap-2 shadow-sm backdrop-blur-sm">
               <div className="flex items-center gap-2">
-                <GraduationCap className="w-5 h-5 text-amber-400" />
-                <h2 className="text-sm sm:text-base font-black text-white">
-                  إعداد الاختبار ومسابقة السبورة
-                </h2>
-                <span className="text-[11px] text-slate-400 font-bold hidden sm:inline">
-                  • اختر الطلاب من القائمة يميناً وجهّز معايير الاختبار
-                </span>
+                <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <GraduationCap className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-xs sm:text-sm font-black text-white">
+                    إعداد مسابقة السبورة الصفية
+                  </h2>
+                  <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                    حدد الطلاب من القائمة الجانبية واختر معايير الجداول
+                  </span>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setIsUploadModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-black flex items-center gap-1.5 transition-all"
+                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-300 border border-indigo-500/25 text-xs font-bold flex items-center gap-1.5 transition-colors"
                 >
                   <Upload className="w-3.5 h-3.5" />
                   <span>رفع ولصق أسماء</span>
@@ -736,7 +740,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
 
                 <button
                   onClick={() => setIsDatabaseModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-black flex items-center gap-1.5 transition-all"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-amber-300 border border-amber-500/25 text-xs font-bold flex items-center gap-1.5 transition-colors"
                 >
                   <Database className="w-3.5 h-3.5 text-amber-400" />
                   <span>سجل الاختبارات 💾</span>
@@ -745,72 +749,73 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
             </div>
 
             {/* MAIN 2-COLUMN LAYOUT:
-                RIGHT: Clean, simple-width student list (قائمة عرضها بسيط ناحية اليمين)
-                LEFT: Full remaining space dedicated to test setup (وباقي المساحة لاعداد الاختبار) */}
+                RIGHT: Slim, neat student sidebar (260px)
+                LEFT: Structured test configuration panels */}
             <div className="flex flex-col lg:flex-row gap-3.5 items-start">
               
-              {/* 1. RIGHT SIDEBAR: SIMPLE, CLEAN STUDENT LIST */}
-              <div className="w-full lg:w-72 xl:w-80 shrink-0 bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-3.5 space-y-2.5 shadow-xl">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              {/* 1. RIGHT SIDEBAR: COMPACT, NEAT STUDENT ROSTER */}
+              <div className="w-full lg:w-64 xl:w-72 shrink-0 bg-slate-900/90 border border-slate-800/90 rounded-2xl p-3 space-y-2 shadow-lg">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/80">
                   <div className="flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-amber-400" />
+                    <Users className="w-3.5 h-3.5 text-amber-400" />
                     <h3 className="text-xs font-black text-white">
                       قائمة الطلاب ({toHindi(visibleStudents.length)})
                     </h3>
                   </div>
 
-                  <span className="text-[11px] font-mono font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                  <span className="text-[10px] font-mono font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
                     {toHindi(selectedStudentIds.size)} محدد
                   </span>
                 </div>
 
                 {/* Quick Selection Buttons */}
-                <div className="flex items-center gap-1">
+                <div className="grid grid-cols-4 gap-1">
                   <button
                     onClick={selectAllVisible}
-                    className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition-colors"
+                    className="py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-[10px] font-bold transition-colors"
                   >
                     تحديد الكل
                   </button>
                   <button
                     onClick={clearVisibleSelection}
-                    className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-red-400 text-[11px] font-bold transition-colors"
+                    className="py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-400 hover:text-rose-400 text-[10px] font-bold transition-colors"
                   >
                     إلغاء
                   </button>
                   <button
-                    onClick={() => selectRandomVisible(6)}
-                    className="flex-1 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors"
+                    onClick={() => selectRandomVisible(4)}
+                    className="py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors border border-indigo-500/20"
+                    title="اختيار عشوائي لـ 4 طلاب"
                   >
-                    <Shuffle className="w-3 h-3" />
-                    <span>(٦)</span>
+                    <Shuffle className="w-2.5 h-2.5" />
+                    <span>عشوائي</span>
                   </button>
                   <button
                     onClick={() => { sounds.playTap(); setIsRouletteOpen(true); }}
                     disabled={visibleStudents.length === 0}
-                    className="py-1 px-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-bold disabled:opacity-40 transition-colors"
-                    title="عجلة الحظ"
+                    className="py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-[10px] font-bold disabled:opacity-40 transition-colors border border-amber-500/20 flex items-center justify-center gap-0.5"
+                    title="عجلة الحظ التفاعلية"
                   >
-                    🎡
+                    <span>🎡 قرعة</span>
                   </button>
                 </div>
 
-                {/* Search */}
+                {/* Search Input */}
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
+                  <Search className="w-3 h-3 text-slate-400 absolute right-2.5 top-2.5" />
                   <input
                     type="text"
                     placeholder="بحث سريع بالاسم..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-7 pl-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-400 placeholder:text-slate-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg pr-7 pl-2 py-1 text-xs text-white outline-none focus:border-amber-400 placeholder:text-slate-500 transition-colors"
                   />
                 </div>
 
-                {/* Clean, minimalist student list */}
-                <div className="space-y-1 max-h-[460px] overflow-y-auto p-1 bg-slate-950/70 rounded-xl border border-slate-800/80 custom-scrollbar">
+                {/* Clean, compact scrollable student items */}
+                <div className="space-y-1 max-h-[360px] overflow-y-auto p-1 bg-slate-950/60 rounded-xl border border-slate-800/60 custom-scrollbar">
                   {visibleStudents.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-slate-500 font-bold">
+                    <div className="py-6 text-center text-xs text-slate-500 font-medium">
                       لا يوجد طلاب مسجلون في هذا الصف
                     </div>
                   ) : (
@@ -820,10 +825,10 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                         <div
                           key={student.id}
                           onClick={() => toggleStudentSelection(student.id)}
-                          className={`px-2.5 py-1.5 rounded-lg cursor-pointer flex items-center justify-between gap-2 transition-all border text-right ${
+                          className={`px-2 py-1.5 rounded-lg cursor-pointer flex items-center justify-between gap-1.5 transition-all border text-right ${
                             isSelected
-                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-sm font-black'
-                              : 'bg-slate-900/60 border-transparent text-slate-300 hover:bg-slate-800/70 hover:text-white'
+                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 font-black shadow-xs'
+                              : 'bg-slate-900/50 border-transparent text-slate-300 hover:bg-slate-800/60 hover:text-white'
                           }`}
                         >
                           <div className="flex items-center gap-2 min-w-0">
@@ -835,16 +840,16 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                             <span className="text-xs truncate">{student.name}</span>
                           </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-[10px] text-slate-500 font-mono">
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-[9px] text-slate-500 font-mono">
                               فصل {student.section || 'أ'}
                             </span>
                             <button
                               onClick={(e) => handleDeleteStudent(student.id, e)}
-                              className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                              className="p-1 rounded text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                               title="حذف"
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-2.5 h-2.5" />
                             </button>
                           </div>
                         </div>
@@ -853,49 +858,50 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   )}
                 </div>
 
-                {/* Add single student inline */}
-                <div className="pt-1 flex gap-1.5 border-t border-slate-800">
+                {/* Quick Add Inline */}
+                <div className="pt-1 flex gap-1 border-t border-slate-800/80">
                   <input
                     type="text"
                     placeholder="إضافة طالب سريعاً..."
                     value={singleStudentName}
                     onChange={e => setSingleStudentName(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleAddSingleStudent()}
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-white outline-none focus:border-amber-400 placeholder:text-slate-500"
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-amber-400 placeholder:text-slate-500"
                   />
                   <button
                     onClick={handleAddSingleStudent}
                     disabled={!singleStudentName.trim()}
-                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 text-xs font-black transition-colors"
+                    className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 text-xs font-black transition-colors"
                   >
                     +
                   </button>
                 </div>
               </div>
 
-              {/* 2. MAIN AREA: TEST PREPARATION (وباقي المساحة لاعداد الاختبار) */}
-              <div className="flex-1 w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
+              {/* 2. MAIN CONFIGURATION AREA: NEAT, REFINED & ORGANIZED */}
+              <div className="flex-1 w-full bg-slate-900/90 border border-slate-800/90 rounded-2xl p-4 sm:p-4.5 space-y-3.5 shadow-lg">
                 
                 {/* 1. الصف والفصل */}
-                <div className="space-y-2 pb-3 border-b border-slate-800/80">
+                <div className="space-y-1.5 pb-2.5 border-b border-slate-800/70">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                    <span className="text-xs font-black text-amber-400 flex items-center gap-1">
                       <span>١. الصف الدراسي والشعبة:</span>
                     </span>
-                    <span className="text-[11px] text-slate-400 font-bold">
+                    <span className="text-[10px] text-slate-400 font-bold bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
                       {SCHOOL_GRADES.find(g => g.id === selectedGradeId)?.name} • {selectedSection === 'all' ? 'جميع الفصول' : `فصل (${selectedSection})`}
                     </span>
                   </div>
 
+                  {/* Grades Buttons */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                     {SCHOOL_GRADES.map(grade => (
                       <button
                         key={grade.id}
                         onClick={() => { sounds.playTap(); setSelectedGradeId(grade.id); }}
-                        className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all border ${
+                        className={`py-1.5 px-2 rounded-xl text-xs font-black transition-all border ${
                           selectedGradeId === grade.id
-                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
-                            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:bg-slate-800'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
+                            : 'bg-slate-950/80 border-slate-800/80 text-slate-300 hover:bg-slate-800'
                         }`}
                       >
                         {grade.name}
@@ -903,15 +909,16 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                     ))}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {/* Sections Row */}
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
                     {['all', 'أ', 'ب', 'ج', 'د'].map(sec => (
                       <button
                         key={sec}
                         onClick={() => { sounds.playTap(); setSelectedSection(sec); }}
-                        className={`px-3 py-1 rounded-xl text-xs font-black transition-all border ${
+                        className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black transition-all border ${
                           selectedSection === sec
-                            ? 'bg-indigo-600 border-indigo-400 text-white shadow-sm'
-                            : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white'
+                            ? 'bg-indigo-600 border-indigo-400 text-white shadow-xs'
+                            : 'bg-slate-950/70 border-slate-800/70 text-slate-400 hover:text-white'
                         }`}
                       >
                         {sec === 'all' ? 'جميع الفصول' : `فصل (${sec})`}
@@ -920,38 +927,38 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   </div>
                 </div>
 
-                {/* 2. جداول الضرب والقسمة المختبرة */}
-                <div className="space-y-2 pb-3 border-b border-slate-800/80">
+                {/* 2. جداول الحساب المختبرة */}
+                <div className="space-y-1.5 pb-2.5 border-b border-slate-800/70">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-black text-amber-400">
                       ٢. جداول الحساب المختبرة:
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => { sounds.playTap(); setSelectedTables([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]); }}
-                        className="text-[11px] text-amber-400 hover:underline font-bold"
+                        className="text-[10px] text-amber-400 hover:underline font-bold"
                       >
                         تحديد الكل (٢-١٢)
                       </button>
-                      <span className="text-slate-600">•</span>
+                      <span className="text-slate-600 text-xs">•</span>
                       <button
                         onClick={() => { sounds.playTap(); setSelectedTables([2, 3, 4, 5]); }}
-                        className="text-[11px] text-indigo-400 hover:underline font-bold"
+                        className="text-[10px] text-indigo-400 hover:underline font-bold"
                       >
                         الأساسية (٢-٥)
                       </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-6 sm:grid-cols-11 gap-1.5">
+                  <div className="grid grid-cols-6 sm:grid-cols-11 gap-1">
                     {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => (
                       <button
                         key={n}
                         onClick={() => { sounds.playTap(); toggleTable(n); }}
-                        className={`h-10 rounded-xl font-black text-xs sm:text-sm border transition-all font-mono ${
+                        className={`h-9 rounded-xl font-black text-xs sm:text-sm border transition-all font-mono ${
                           selectedTables.includes(n)
-                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
-                            : 'bg-slate-950/80 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-white'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
+                            : 'bg-slate-950/80 text-slate-400 border-slate-800/80 hover:bg-slate-800 hover:text-white'
                         }`}
                       >
                         {toHindi(n)}
@@ -961,7 +968,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                 </div>
 
                 {/* 3. نوع العمليات الحسابية */}
-                <div className="space-y-2 pb-3 border-b border-slate-800/80">
+                <div className="space-y-1.5 pb-2.5 border-b border-slate-800/70">
                   <span className="text-xs font-black text-amber-400 block">
                     ٣. نوع العمليات الحسابية:
                   </span>
@@ -974,10 +981,10 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                       <button
                         key={m.id}
                         onClick={() => { sounds.playTap(); setOpMode(m.id as any); }}
-                        className={`py-2.5 px-2 rounded-xl text-xs font-black transition-all border text-center ${
+                        className={`py-2 px-2 rounded-xl text-xs font-black transition-all border text-center ${
                           opMode === m.id
-                            ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
-                            : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                            ? 'bg-indigo-600 text-white border-indigo-400 shadow-xs'
+                            : 'bg-slate-950/80 border-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-800'
                         }`}
                       >
                         {m.label}
@@ -986,17 +993,17 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   </div>
                 </div>
 
-                {/* 4. معايير ونظام الاختبار (الأسئلة، الوقت، نظام التنافس) */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pb-2">
+                {/* 4. معايير المسابقة: نظام التنافس، الأسئلة، الوقت */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pb-1">
                   {/* نوع التنافس */}
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <span className="text-[11px] font-bold text-slate-400 block">نظام المسابقة:</span>
+                  <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800/70 space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 block">نظام المسابقة:</span>
                     <div className="grid grid-cols-2 gap-1">
                       <button
                         onClick={() => { sounds.playTap(); setCompetitionType('points'); }}
-                        className={`py-1.5 rounded-lg text-xs font-black border transition-all ${
+                        className={`py-1 rounded-lg text-[11px] font-black border transition-all ${
                           competitionType === 'points'
-                            ? 'bg-amber-500 text-slate-950 border-amber-400'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
                             : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                         }`}
                       >
@@ -1004,9 +1011,9 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                       </button>
                       <button
                         onClick={() => { sounds.playTap(); setCompetitionType('sudden_death'); }}
-                        className={`py-1.5 rounded-lg text-xs font-black border transition-all ${
+                        className={`py-1 rounded-lg text-[11px] font-black border transition-all ${
                           competitionType === 'sudden_death'
-                            ? 'bg-red-600 text-white border-red-400'
+                            ? 'bg-rose-600 text-white border-rose-400 shadow-xs'
                             : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                         }`}
                       >
@@ -1015,77 +1022,90 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                     </div>
                   </div>
 
-                  {/* عدد الأسئلة */}
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <span className="text-[11px] font-bold text-slate-400 block">الأسئلة لكل طالب:</span>
-                    <div className="grid grid-cols-4 gap-1">
-                      {[1, 2, 3, 5].map(cnt => (
-                        <button
-                          key={cnt}
-                          onClick={() => { sounds.playTap(); setRoundsPerStudent(cnt); }}
-                          className={`py-1.5 rounded-lg text-xs font-black font-mono border transition-all ${
-                            roundsPerStudent === cnt
-                              ? 'bg-amber-500 text-slate-950 border-amber-400'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          {toHindi(cnt)}
-                        </button>
-                      ))}
+                  {/* عدد الأسئلة مع إدخال رقم حر دون أي تقييد */}
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/70 space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
+                      <span>الأسئلة لكل طالب (حر):</span>
+                      <span className="text-amber-400 font-mono font-black">{toHindi(roundsPerStudent)} أسئلة</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="1"
+                        max="200"
+                        value={roundsPerStudent}
+                        onChange={e => setRoundsPerStudent(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-16 bg-slate-900 border border-amber-500/50 rounded-lg py-1 px-1.5 text-center font-mono font-black text-xs text-amber-300 outline-none focus:border-amber-400"
+                        placeholder="أي رقم"
+                        title="اكتب أي عدد أسئلة تريده دون تقييد"
+                      />
+                      <div className="flex-1 grid grid-cols-4 gap-0.5">
+                        {[1, 2, 3, 5].map(cnt => (
+                          <button
+                            key={cnt}
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(cnt); }}
+                            className={`py-1 rounded text-[10px] font-black font-mono border transition-all ${
+                              roundsPerStudent === cnt
+                                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {toHindi(cnt)}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
-                  {/* وقت الإجابة */}
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <span className="text-[11px] font-bold text-slate-400 block">وقت السؤال:</span>
-                    <div className="grid grid-cols-4 gap-1">
-                      {[5, 10, 15, 20].map(sec => (
-                        <button
-                          key={sec}
-                          onClick={() => { sounds.playTap(); setTimeLimit(sec); }}
-                          className={`py-1.5 rounded-lg text-xs font-black font-mono border transition-all ${
-                            timeLimit === sec
-                              ? 'bg-amber-500 text-slate-950 border-amber-400'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          {toHindi(sec)}ث
-                        </button>
-                      ))}
+                  {/* وقت الإجابة مع إدخال رقم حر دون أي تقييد */}
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/70 space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
+                      <span>وقت السؤال (حر):</span>
+                      <span className="text-amber-400 font-mono font-black">{toHindi(timeLimit)} ثوانٍ</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="1"
+                        max="300"
+                        value={timeLimit}
+                        onChange={e => setTimeLimit(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-16 bg-slate-900 border border-amber-500/50 rounded-lg py-1 px-1.5 text-center font-mono font-black text-xs text-amber-300 outline-none focus:border-amber-400"
+                        placeholder="أي ثانية"
+                        title="اكتب أي وقت تريده بالثواني دون تقييد"
+                      />
+                      <div className="flex-1 grid grid-cols-4 gap-0.5">
+                        {[5, 10, 15, 20].map(sec => (
+                          <button
+                            key={sec}
+                            type="button"
+                            onClick={() => { sounds.playTap(); setTimeLimit(sec); }}
+                            className={`py-1 rounded text-[10px] font-black font-mono border transition-all ${
+                              timeLimit === sec
+                                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {toHindi(sec)}ث
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 5. شريط تأكيد قاعدة البيانات وملخص الاختبار */}
-                <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-amber-500/10 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-right">
-                  <div className="flex items-center gap-2">
-                    <Database className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <div>
-                      <span className="text-xs font-black text-white block">
-                        قاعدة بيانات التحليل التلقائي مفعّلة 💾
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        سيتم تسجيل درجات ونسب إتقان جميع المتسابقين في قاعدة البيانات للتحليل والمقارنة
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-left font-mono shrink-0">
-                    <span className="text-sm font-black text-amber-400">
-                      {toHindi(selectedStudentIds.size)} طلاب جاهزون
-                    </span>
-                  </div>
+                {/* 5. زر البدء مع ملخص فوري */}
+                <div className="pt-1">
+                  <button
+                    onClick={startClassCompetition}
+                    disabled={selectedStudentIds.size === 0}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 disabled:opacity-30 disabled:pointer-events-none text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.008] flex items-center justify-center gap-2"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>بدء المسابقة والاختبار الآن ({toHindi(selectedStudentIds.size)} طلاب محددين)</span>
+                  </button>
                 </div>
-
-                {/* 6. زر البدء الرئيسي الكبير */}
-                <button
-                  onClick={startClassCompetition}
-                  disabled={selectedStudentIds.size === 0}
-                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 disabled:opacity-30 disabled:pointer-events-none text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-amber-500/20 transition-all hover:scale-[1.01] flex items-center justify-center gap-2"
-                >
-                  <Play className="w-5 h-5 fill-current" />
-                  <span>بدء الاختبار والمسابقة الآن ({toHindi(selectedStudentIds.size)} طلاب)</span>
-                </button>
               </div>
             </div>
           </motion.div>

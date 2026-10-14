@@ -4,15 +4,18 @@
  * without dead links or 404s.
  */
 
+export const VERCEL_APP_URL = 'https://class-table-res.vercel.app';
 const STORAGE_CUSTOM_URL_KEY = 'riyadh_custom_app_base_url';
 
 export function getCustomBaseUrl(): string {
-  if (typeof window === 'undefined') return '';
+  if (typeof window === 'undefined') return VERCEL_APP_URL;
   try {
-    return localStorage.getItem(STORAGE_CUSTOM_URL_KEY) || '';
+    const saved = localStorage.getItem(STORAGE_CUSTOM_URL_KEY);
+    if (saved) return saved;
   } catch {
-    return '';
+    // ignore
   }
+  return VERCEL_APP_URL;
 }
 
 export function setCustomBaseUrl(url: string): void {
@@ -29,20 +32,29 @@ export function setCustomBaseUrl(url: string): void {
   }
 }
 
+/**
+ * Get direct URL to join a room through Vercel
+ */
+export function getVercelRoomUrl(roomId: string): string {
+  const code = roomId.trim().toUpperCase();
+  return `${VERCEL_APP_URL}/?room=${code}`;
+}
+
 export function getPublicUrl(path: string = ''): string {
   if (typeof window === 'undefined') return path;
 
-  // 1. Check if user configured a custom deployed URL (e.g. on Vercel or custom domain)
-  const customBase = getCustomBaseUrl();
-  let baseOrigin = customBase;
-
-  // 2. Otherwise use current actual window origin and pathname
-  if (!baseOrigin) {
+  // 1. If currently running on Vercel itself, use current origin
+  if (window.location.hostname.includes('vercel.app')) {
     const origin = window.location.origin;
-    // Strip trailing slash from pathname (keep subpaths if hosted on GitHub Pages or custom route)
     const pathname = window.location.pathname.replace(/\/+$/, '');
-    baseOrigin = `${origin}${pathname}`;
+    const base = `${origin}${pathname}`;
+    if (!path) return base;
+    if (path.startsWith('?') || path.startsWith('#')) return `${base}${path}`;
+    return `${base}${path.startsWith('/') ? path : `/${path}`}`;
   }
+
+  // 2. Otherwise default to the official Vercel deployment: https://class-table-res.vercel.app
+  const baseOrigin = getCustomBaseUrl() || VERCEL_APP_URL;
 
   if (!path) return baseOrigin;
 

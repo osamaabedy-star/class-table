@@ -150,6 +150,12 @@ function saveRooms() {
   }
 }
 
+function getRoom(roomId: string | undefined): Room | undefined {
+  if (!roomId) return undefined;
+  loadRooms();
+  return rooms[roomId.toUpperCase()];
+}
+
 loadRooms();
 
 function shuffle<T>(array: T[]): T[] {
@@ -191,7 +197,17 @@ function generateRoomQuestions(
     }
   }
 
-  const selectedCandidates = shuffle(candidates).slice(0, count);
+  // Support any question count without restrictions (cycles candidates if user requests more than available)
+  const targetCount = Math.max(1, count || 10);
+  const selectedCandidates: typeof candidates = [];
+
+  while (selectedCandidates.length < targetCount && candidates.length > 0) {
+    const pool = shuffle([...candidates]);
+    for (const item of pool) {
+      selectedCandidates.push(item);
+      if (selectedCandidates.length >= targetCount) break;
+    }
+  }
 
   return selectedCandidates.map((c, idx) => {
     const correct = c.answer;
@@ -388,7 +404,7 @@ app.get('/api/rooms', (req: Request, res: Response) => {
 // 2. Get room details (with auto-advancing check & security answer masking for students)
 app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -420,7 +436,7 @@ app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
 app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const { name } = req.body;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
 
   if (!room) {
     res.status(404).json({ error: 'رمز الغرفة غير صحيح' });
@@ -463,7 +479,7 @@ app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
 // 4. Start room manually (for teacher or host)
 app.post('/api/rooms/:roomId/start', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -479,7 +495,7 @@ app.post('/api/rooms/:roomId/start', (req: Request, res: Response) => {
 app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const { name, questionIndex, selectedOption, timeRemaining } = req.body;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
 
   if (!room || !room.students[name]) {
     res.status(404).json({ error: 'المتسابق أو الغرفة غير مسجل' });
@@ -541,7 +557,7 @@ app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
 // 6. Reset or end room
 app.post('/api/rooms/:roomId/end', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
   if (room) {
     room.status = 'finished';
     saveRooms();
@@ -552,7 +568,7 @@ app.post('/api/rooms/:roomId/end', (req: Request, res: Response) => {
 // 7. Advance / Skip to next question immediately by teacher
 app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -572,7 +588,7 @@ app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
 // 8. Go back to previous question by teacher
 app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -589,7 +605,7 @@ app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
 // 9. Repeat current question (reset answers for current index)
 app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -607,7 +623,7 @@ app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
 // 10. Add mock/test student named "تجريبي" only
 app.post('/api/rooms/:roomId/add-test-student', (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = rooms[roomId.toUpperCase()];
+  const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;

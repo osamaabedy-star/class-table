@@ -35,7 +35,8 @@ import {
   Bot,
   GraduationCap,
   ShieldCheck,
-  Share2
+  Share2,
+  ExternalLink
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -233,38 +234,104 @@ const CreateRoomView: React.FC<CreateRoomViewProps> = ({ initialType, onBack, on
             </div>
           </div>
 
-          {/* Time and Question Count */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="bg-slate-800/50 p-2.5 rounded-xl border border-slate-700/60">
-              <div className="flex justify-between text-[11px] font-bold text-slate-300 mb-1">
-                <span>عدد الأسئلة:</span>
-                <span className="text-indigo-400 font-black">{toHindi(qCount)}</span>
-              </div>
-              <input
-                type="range"
-                min="5"
-                max="25"
-                step="5"
-                value={qCount}
-                onChange={e => setQCount(Number(e.target.value))}
-                className="w-full accent-indigo-500 cursor-pointer h-1.5"
-              />
+          {/* Unrestricted Time and Question Count with free custom inputs */}
+          <div className="space-y-2">
+            <div className="bg-slate-800/40 p-1.5 rounded-lg border border-slate-700/60 text-center">
+              <span className="text-[10px] text-amber-300 font-bold">
+                ⚡ إدخال حر: يمكنك كتابة أي عدد أسئلة وأي وقت بالثواني تريده دون التقيد بالأرقام المسجلة
+              </span>
             </div>
 
-            <div className="bg-slate-800/50 p-2.5 rounded-xl border border-slate-700/60">
-              <div className="flex justify-between text-[11px] font-bold text-slate-300 mb-1">
-                <span>زمن السؤال:</span>
-                <span className="text-amber-400 font-black">{toHindi(time)} ثوانٍ</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Question Count */}
+              <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/70 space-y-2">
+                <div className="flex justify-between items-center text-[11px] font-bold text-slate-300">
+                  <span>عدد الأسئلة (حر):</span>
+                  <span className="text-indigo-400 font-black font-mono">{toHindi(qCount)} سؤال</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={qCount}
+                    onChange={e => setQCount(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-20 bg-slate-900 border border-indigo-500/60 rounded-lg px-2 py-1 text-xs font-mono font-black text-center text-white outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400"
+                    placeholder="اكتب أي رقم"
+                    title="اكتب أي عدد تريده"
+                  />
+                  <div className="flex-1 flex flex-wrap gap-1">
+                    {[5, 10, 15, 20, 25, 50].map(cnt => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => setQCount(cnt)}
+                        className={`flex-1 py-1 px-1 rounded text-[10px] font-black font-mono transition-colors ${
+                          qCount === cnt ? 'bg-indigo-600 text-white' : 'bg-slate-750 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {toHindi(cnt)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={Math.min(100, qCount)}
+                    onChange={e => setQCount(Number(e.target.value))}
+                    className="flex-1 accent-indigo-500 cursor-pointer h-1.5"
+                  />
+                  <span className="text-[9px] text-slate-400 font-bold">أو اسحب المؤشر</span>
+                </div>
               </div>
-              <input
-                type="range"
-                min="5"
-                max="20"
-                step="5"
-                value={time}
-                onChange={e => setTime(Number(e.target.value))}
-                className="w-full accent-amber-500 cursor-pointer h-1.5"
-              />
+
+              {/* Time Per Question */}
+              <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/70 space-y-2">
+                <div className="flex justify-between items-center text-[11px] font-bold text-slate-300">
+                  <span>زمن السؤال (حر):</span>
+                  <span className="text-amber-400 font-black font-mono">{toHindi(time)} ثوانٍ</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    max="300"
+                    value={time}
+                    onChange={e => setTime(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-20 bg-slate-900 border border-amber-500/60 rounded-lg px-2 py-1 text-xs font-mono font-black text-center text-amber-300 outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+                    placeholder="اكتب بالثواني"
+                    title="اكتب أي وقت تريده بالثواني"
+                  />
+                  <div className="flex-1 flex flex-wrap gap-1">
+                    {[3, 5, 10, 15, 20, 30].map(sec => (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => setTime(sec)}
+                        className={`flex-1 py-1 px-1 rounded text-[10px] font-black font-mono transition-colors ${
+                          time === sec ? 'bg-amber-500 text-slate-950 font-black' : 'bg-slate-750 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {toHindi(sec)}ث
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="1"
+                    max="60"
+                    value={Math.min(60, time)}
+                    onChange={e => setTime(Number(e.target.value))}
+                    className="flex-1 accent-amber-500 cursor-pointer h-1.5"
+                  />
+                  <span className="text-[9px] text-slate-400 font-bold">أو اسحب المؤشر</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1160,8 +1227,18 @@ export default function App() {
               </div>
             </div>
 
-            {/* Direct Share Link for Friends & Students */}
-            <div className="space-y-1.5 pt-1">
+            {/* Direct Share Link & Vercel Site Actions */}
+            <div className="space-y-2 pt-1">
+              <a
+                href={`https://class-table-res.vercel.app/?room=${roomId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/25 transition-all active:scale-98"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>فتح الغرفة مباشرة في موقع فيرسل (class-table-res.vercel.app)</span>
+              </a>
+
               <button
                 type="button"
                 onClick={copyRoomLink}

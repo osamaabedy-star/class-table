@@ -40,7 +40,8 @@ import {
   Bot,
   Swords,
   ChevronRight,
-  ChevronLeft
+  ChevronLeft,
+  ExternalLink
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -989,18 +990,29 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
                 <QRCodeCanvas value={getPublicUrl(`?room=${roomId}`)} size={210} />
               </div>
 
-              {/* Link Box */}
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+              {/* Link Box & Direct Vercel Actions */}
+              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-2">
                 <span className="text-[10px] text-emerald-400 font-mono block truncate select-all dir-ltr">
                   {getPublicUrl(`?room=${roomId}`)}
                 </span>
-                <button
-                  onClick={handleCopyLink}
-                  className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>{copiedLink ? 'تم نسخ الرابط بنجاح!' : 'نسخ رابط الغرفة'}</span>
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  <button
+                    onClick={handleCopyLink}
+                    className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>{copiedLink ? 'تم نسخ الرابط!' : 'نسخ الرابط'}</span>
+                  </button>
+                  <a
+                    href={`https://class-table-res.vercel.app/?room=${roomId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>فتح عبر موقع فيرسل</span>
+                  </a>
+                </div>
               </div>
 
               {/* Prominent Bottom Return Button */}

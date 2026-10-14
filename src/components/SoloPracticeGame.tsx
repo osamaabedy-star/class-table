@@ -254,23 +254,39 @@ export const SoloPracticeGame: React.FC<SoloPracticeGameProps> = ({ onBack }) =>
               </div>
             </div>
 
-            {/* Duration */}
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5">مدة التحدي:</label>
-              <div className="grid grid-cols-3 gap-2">
-                {[30, 45, 60].map(sec => (
-                  <button
-                    key={sec}
-                    onClick={() => { sounds.playTap(); setGameDuration(sec); }}
-                    className={`py-2 rounded-xl text-xs font-black border transition-all ${
-                      gameDuration === sec
-                        ? 'bg-indigo-600 text-white border-indigo-400'
-                        : 'bg-slate-800 text-slate-400 border-slate-700'
-                    }`}
-                  >
-                    {toHindi(sec)} ثانية
-                  </button>
-                ))}
+            {/* Duration with Free Custom Input */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-xs font-bold text-slate-300">
+                <span>مدة التحدي (حر):</span>
+                <span className="text-amber-400 font-mono font-black">{toHindi(gameDuration)} ثانية</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="10"
+                  max="600"
+                  value={gameDuration}
+                  onChange={e => setGameDuration(Math.max(5, Number(e.target.value) || 30))}
+                  className="w-20 bg-slate-800 border border-amber-500/50 rounded-xl px-2 py-1.5 text-center font-mono font-black text-xs text-amber-300 outline-none focus:border-amber-400"
+                  placeholder="أي ثانية"
+                  title="اكتب أي وقت تريده بالثواني"
+                />
+                <div className="flex-1 grid grid-cols-4 gap-1">
+                  {[30, 45, 60, 90].map(sec => (
+                    <button
+                      key={sec}
+                      type="button"
+                      onClick={() => { sounds.playTap(); setGameDuration(sec); }}
+                      className={`py-1.5 rounded-xl text-xs font-black border transition-all ${
+                        gameDuration === sec
+                          ? 'bg-indigo-600 text-white border-indigo-400'
+                          : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                      }`}
+                    >
+                      {toHindi(sec)}ث
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
