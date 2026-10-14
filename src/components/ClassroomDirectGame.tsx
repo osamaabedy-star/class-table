@@ -27,7 +27,8 @@ import {
   Sparkles,
   Swords,
   Database,
-  FileDown
+  FileDown,
+  SkipForward
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { sounds } from '../utils/audio';
@@ -311,7 +312,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       if (advanced.length > 0) valid = advanced;
     }
 
-    const table = valid[Math.floor(Math.random() * valid.length)];
+    const table = valid[Math.floor(Math.random() * valid.length)] || 2;
     const factor = Math.floor(Math.random() * 11) + 2;
     const isDiv = opMode === 'divi' || (opMode === 'mixed' && Math.random() > 0.5);
 
@@ -319,10 +320,26 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       const product = table * factor;
       const answer = factor;
       const opts = new Set<number>([answer]);
+      const pool = [
+        answer + 1,
+        answer - 1,
+        answer + 2,
+        answer - 2,
+        answer + 3,
+        answer - 3,
+        factor + 1,
+        factor - 1,
+        table
+      ].filter(x => x > 0 && x !== answer);
+      pool.sort(() => Math.random() - 0.5);
+      for (const p of pool) {
+        opts.add(p);
+        if (opts.size >= 4) break;
+      }
+      let fallback = answer > 3 ? answer - 2 : 1;
       while (opts.size < 4) {
-        const delta = (Math.random() > 0.5 ? 1 : -1) * (Math.floor(Math.random() * 3) + 1);
-        const wrong = answer + delta;
-        if (wrong > 0 && wrong !== answer) opts.add(wrong);
+        if (fallback > 0 && fallback !== answer) opts.add(fallback);
+        fallback++;
       }
       return {
         a: product,
@@ -334,10 +351,29 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
     } else {
       const answer = table * factor;
       const opts = new Set<number>([answer]);
+      const pool = [
+        answer + table,
+        answer - table,
+        answer + 1,
+        answer - 1,
+        answer + 2,
+        answer - 2,
+        answer + 10,
+        answer - 10,
+        (table + 1) * factor,
+        (table - 1) * factor,
+        table * (factor + 1),
+        table * (factor - 1)
+      ].filter(x => x > 0 && x !== answer);
+      pool.sort(() => Math.random() - 0.5);
+      for (const p of pool) {
+        opts.add(p);
+        if (opts.size >= 4) break;
+      }
+      let fallback = answer > 5 ? answer - 4 : 1;
       while (opts.size < 4) {
-        const delta = (Math.random() > 0.5 ? table : 1) * (Math.random() > 0.5 ? 1 : -1);
-        const wrong = answer + delta;
-        if (wrong > 0 && wrong !== answer) opts.add(wrong);
+        if (fallback > 0 && fallback !== answer) opts.add(fallback);
+        fallback++;
       }
       return {
         a: table,
@@ -424,11 +460,11 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       );
     }
 
-    setIntermissionTimer(3);
+    setIntermissionTimer(2);
     setGameState('intermission');
   };
 
-  // 3-second intermission countdown
+  // Intermission countdown (auto-advances to next student/question)
   useEffect(() => {
     if (gameState !== 'intermission') return;
 
@@ -439,44 +475,41 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       }, 1000);
       return () => clearTimeout(t);
     } else {
-      const t = setTimeout(() => {
-        advanceNextTurn();
-      }, 100);
-      return () => clearTimeout(t);
+      advanceNextTurn();
     }
   }, [intermissionTimer, gameState]);
 
   const finishGame = () => {
-    // Update stats for all participating students in localStorage
-    setStudentsList(prev => {
-      const participantMap = new Map(activeStudents.map(a => [a.id, a]));
-      return prev.map(std => {
-        const match = participantMap.get(std.id);
-        if (match) {
-          const newCount = (std.participationCount || 0) + 1;
-          const newLevel = Math.min(5, Math.max(1, Math.floor(match.correctAnswers) + 1));
-          return {
-            ...std,
-            participationCount: newCount,
-            lastActiveDate: 'اليوم',
-            level: newLevel
-          };
-        }
-        return std;
-      });
-    });
-
-    // Record to server for admin analytics & honor rolls
-    recordGameParticipation(activeStudents.map(a => ({
-      name: a.name,
-      score: a.score,
-      correctCount: a.correctAnswers,
-      totalAnswered: a.totalAnswered,
-      streak: a.correctAnswers
-    })));
-
-    // Record complete test session to test database for deep analysis
     try {
+      // Update stats for all participating students in localStorage
+      setStudentsList(prev => {
+        const participantMap = new Map(activeStudents.map(a => [a.id, a]));
+        return prev.map(std => {
+          const match = participantMap.get(std.id);
+          if (match) {
+            const newCount = (std.participationCount || 0) + 1;
+            const newLevel = Math.min(5, Math.max(1, Math.floor(match.correctAnswers) + 1));
+            return {
+              ...std,
+              participationCount: newCount,
+              lastActiveDate: 'اليوم',
+              level: newLevel
+            };
+          }
+          return std;
+        });
+      });
+
+      // Record to server for admin analytics & honor rolls
+      recordGameParticipation(activeStudents.map(a => ({
+        name: a.name,
+        score: a.score,
+        correctCount: a.correctAnswers,
+        totalAnswered: a.totalAnswered,
+        streak: a.correctAnswers
+      }))).catch(() => {});
+
+      // Record complete test session to test database for deep analysis
       const totalCorrect = activeStudents.reduce((acc, s) => acc + s.correctAnswers, 0);
       const totalAns = activeStudents.reduce((acc, s) => acc + s.totalAnswered, 0);
       const avgAccuracy = totalAns > 0 ? Math.round((totalCorrect / totalAns) * 100) : 0;
@@ -508,57 +541,77 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
         }))
       });
     } catch (e) {
-      console.warn('Failed to save test session to database:', e);
+      console.warn('Finish game error:', e);
     }
 
-    sounds.playFanfare();
-    confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
+    try {
+      sounds.playFanfare();
+      confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
+    } catch {
+      // ignore
+    }
     setGameState('finished');
   };
 
   const advanceNextTurn = () => {
-    // If Sudden Death mode, check if 1 or 0 standing students remain
-    if (competitionType === 'sudden_death') {
-      const remainingStanding = activeStudents.filter(s => !s.eliminated);
-      if (remainingStanding.length <= 1 && activeStudents.length > 1) {
+    try {
+      if (activeStudents.length === 0) {
         finishGame();
         return;
       }
-    }
 
-    // Find next non-eliminated student
-    let nextIdx = currentStudentIndex + 1;
-    while (nextIdx < activeStudents.length && activeStudents[nextIdx]?.eliminated) {
-      nextIdx++;
-    }
-
-    if (nextIdx < activeStudents.length) {
-      setCurrentStudentIndex(nextIdx);
-      setCurrentQ(generateSingleQuestion());
-      setTimeLeft(timeLimit);
-      setIsAnswered(false);
-      setSelectedOption(null);
-      setGameState('playing');
-    } else {
-      if (currentRound < roundsPerStudent) {
-        let firstActive = 0;
-        while (firstActive < activeStudents.length && activeStudents[firstActive]?.eliminated) {
-          firstActive++;
-        }
-        if (firstActive >= activeStudents.length) {
+      // If Sudden Death mode, check if 1 or 0 standing students remain
+      if (competitionType === 'sudden_death') {
+        const remainingStanding = activeStudents.filter(s => !s.eliminated);
+        if (remainingStanding.length <= 1 && activeStudents.length > 1) {
           finishGame();
           return;
         }
-        setCurrentRound(prev => prev + 1);
-        setCurrentStudentIndex(firstActive);
+      }
+
+      // Find next non-eliminated student in active round
+      let nextIdx = currentStudentIndex + 1;
+      while (nextIdx < activeStudents.length && activeStudents[nextIdx]?.eliminated) {
+        nextIdx++;
+      }
+
+      if (nextIdx < activeStudents.length) {
+        setCurrentStudentIndex(nextIdx);
         setCurrentQ(generateSingleQuestion());
         setTimeLeft(timeLimit);
         setIsAnswered(false);
         setSelectedOption(null);
         setGameState('playing');
       } else {
-        finishGame();
+        // Next round
+        if (currentRound < roundsPerStudent) {
+          let firstActive = 0;
+          while (firstActive < activeStudents.length && activeStudents[firstActive]?.eliminated) {
+            firstActive++;
+          }
+          if (firstActive >= activeStudents.length) {
+            finishGame();
+            return;
+          }
+          setCurrentRound(prev => prev + 1);
+          setCurrentStudentIndex(firstActive);
+          setCurrentQ(generateSingleQuestion());
+          setTimeLeft(timeLimit);
+          setIsAnswered(false);
+          setSelectedOption(null);
+          setGameState('playing');
+        } else {
+          finishGame();
+        }
       }
+    } catch (err) {
+      console.error('Error in advanceNextTurn:', err);
+      // Failsafe: force next question
+      setCurrentQ(generateSingleQuestion());
+      setTimeLeft(timeLimit);
+      setIsAnswered(false);
+      setSelectedOption(null);
+      setGameState('playing');
     }
   };
 
@@ -578,8 +631,16 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
     exportResultsToExcel(rows, `نتائج_مسابقة_${selectedGradeId}_فصل_${selectedSection}`);
   };
 
-  const currentStudent = activeStudents[currentStudentIndex];
-  const nextStudent = activeStudents[(currentStudentIndex + 1) % (activeStudents.length || 1)];
+  const currentStudent = activeStudents[currentStudentIndex] || {
+    id: 'placeholder',
+    name: 'الطالب',
+    score: 0,
+    correctAnswers: 0,
+    totalAnswered: 0,
+    percentage: 0,
+    eliminated: false
+  };
+  const nextStudent = activeStudents[(currentStudentIndex + 1) % (activeStudents.length || 1)] || currentStudent;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col justify-between selection:bg-amber-500">
@@ -1154,6 +1215,20 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                     <Timer className="w-3.5 h-3.5" />
                     <span>{toHindi(timeLeft)} ث</span>
                   </div>
+
+                  {/* Immediate Next Question / Skip Button */}
+                  <button
+                    onClick={() => {
+                      sounds.playTap();
+                      advanceNextTurn();
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-950/80 hover:bg-slate-950 text-amber-300 hover:text-white border border-amber-500/40 text-xs font-black transition-all active:scale-95 cursor-pointer shadow-sm"
+                    title="الانتقال للسؤال التالي مباشرة دون انتظار"
+                  >
+                    <SkipForward className="w-3.5 h-3.5 fill-current" />
+                    <span className="hidden sm:inline">السؤال التالي</span>
+                    <span className="sm:hidden">التالي</span>
+                  </button>
                 </div>
               </motion.div>
 
@@ -1192,12 +1267,24 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                     </p>
                   </div>
 
-                  <div className="py-2">
-                    <span className="text-xs text-slate-400 block font-bold mb-1">الانتقال التلقائي خلال:</span>
-                    <span className="text-5xl font-black font-mono text-amber-400 animate-pulse inline-block">
+                  <div className="py-1">
+                    <span className="text-xs text-slate-400 block font-bold mb-0.5">الانتقال التلقائي خلال:</span>
+                    <span className="text-4xl sm:text-5xl font-black font-mono text-amber-400 animate-pulse inline-block">
                       {toHindi(intermissionTimer)}
                     </span>
                   </div>
+
+                  {/* Immediate Action Button */}
+                  <button
+                    onClick={() => {
+                      sounds.playTap();
+                      advanceNextTurn();
+                    }}
+                    className="mt-1 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-all border border-amber-400"
+                  >
+                    <SkipForward className="w-4 h-4 fill-current" />
+                    <span>الانتقال للسؤال التالي الآن ⏭️</span>
+                  </button>
                 </motion.div>
               ) : currentQ ? (
                 <div className="flex-1 bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-xl flex flex-col justify-between items-center text-center">

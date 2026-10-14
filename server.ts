@@ -488,6 +488,7 @@ app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
   } else {
     room.status = 'finished';
   }
+  saveRooms();
   res.json({ success: true, room });
 });
 
@@ -504,6 +505,7 @@ app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
     room.status = 'playing';
     room.questionStartedAt = Date.now();
   }
+  saveRooms();
   res.json({ success: true, room });
 });
 
@@ -521,6 +523,7 @@ app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
   });
   room.status = 'playing';
   room.questionStartedAt = Date.now();
+  saveRooms();
   res.json({ success: true, room });
 });
 

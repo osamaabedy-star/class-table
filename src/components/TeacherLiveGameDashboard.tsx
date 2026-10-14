@@ -102,6 +102,7 @@ interface TeacherLiveGameDashboardProps {
   activeRoomsCount: number;
   onOpenActiveRooms: () => void;
   onEndGame: () => void;
+  onRoomUpdate?: (room: Room) => void;
   showToast?: (msg: string) => void;
 }
 
@@ -116,6 +117,7 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
   activeRoomsCount,
   onOpenActiveRooms,
   onEndGame,
+  onRoomUpdate,
   showToast
 }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
@@ -221,8 +223,14 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     sounds.playTap();
     try {
       const res = await fetch(`/api/rooms/${roomId}/next`, { method: 'POST' });
-      if (res.ok && showToast) {
-        showToast('تم الانتقال للسؤال التالي');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.room && onRoomUpdate) {
+          onRoomUpdate(data.room);
+        }
+        if (showToast) {
+          showToast('تم الانتقال للسؤال التالي');
+        }
       }
     } catch {
       // ignore
@@ -236,8 +244,14 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     sounds.playTap();
     try {
       const res = await fetch(`/api/rooms/${roomId}/prev`, { method: 'POST' });
-      if (res.ok && showToast) {
-        showToast('تم الرجوع للسؤال السابق');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.room && onRoomUpdate) {
+          onRoomUpdate(data.room);
+        }
+        if (showToast) {
+          showToast('تم الرجوع للسؤال السابق');
+        }
       }
     } catch {
       // ignore
@@ -249,8 +263,14 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     sounds.playTap();
     try {
       const res = await fetch(`/api/rooms/${roomId}/repeat`, { method: 'POST' });
-      if (res.ok && showToast) {
-        showToast('تمت إعادة تشغيل السؤال الحالي وتصفير الإجابات');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.room && onRoomUpdate) {
+          onRoomUpdate(data.room);
+        }
+        if (showToast) {
+          showToast('تمت إعادة تشغيل السؤال الحالي وتصفير الإجابات');
+        }
       }
     } catch {
       // ignore

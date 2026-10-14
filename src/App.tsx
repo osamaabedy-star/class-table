@@ -1260,6 +1260,7 @@ export default function App() {
             await fetch(`/api/rooms/${roomId}/end`, { method: 'POST' });
             setView('leaderboard');
           }}
+          onRoomUpdate={setRoom}
           showToast={showToast}
         />
       );
