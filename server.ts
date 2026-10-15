@@ -3,8 +3,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
 import type { Request, Response } from 'express';
-
 import crypto from 'crypto';
+import { dbAdapter } from './src/services/dbAdapter';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -154,6 +154,14 @@ function saveRooms() {
     fs.writeFileSync(ROOMS_DATA_FILE, JSON.stringify(rooms, null, 2), 'utf-8');
   } catch (e) {
     // In read-only fallback, memory cache maintains state
+  }
+  // Sync to dbAdapter for cloud persistence
+  try {
+    Object.values(rooms).forEach(r => {
+      dbAdapter.saveRoom(r).catch(() => {});
+    });
+  } catch {
+    // ignore
   }
 }
 
