@@ -55,9 +55,13 @@ import { HonorBoardModal } from './components/HonorBoardModal';
 import { getPublicUrl, copyToClipboard, getCustomBaseUrl, setCustomBaseUrl } from './utils/publicUrl';
 import { 
   SchoolStudent, 
-  fetchSchoolStudentsFromServer, 
-  recordGameParticipation 
+  fetchSchoolStudentsFromServer 
 } from './data/students';
+import { 
+  getRoomHostToken, 
+  setRoomHostToken, 
+  getHostAuthHeaders 
+} from './utils/auth';
 
 // --- Types ---
 interface Question {
@@ -650,7 +654,14 @@ export default function App() {
           const cleanCode = roomParam.trim().toUpperCase();
           setRoomId(cleanCode);
           setQuickRoomCode(cleanCode);
-          setView('join');
+          const hostToken = getRoomHostToken(cleanCode);
+          if (hostToken) {
+            setIsTeacher(true);
+            setView('lobby');
+          } else {
+            setIsTeacher(false);
+            setView('join');
+          }
         }
       } catch {
         // ignore
@@ -692,12 +703,12 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  // Room polling (Role-aware to safeguard question answers)
+  // Room polling (Securely authorized via host token or student masked)
   const fetchRoom = useCallback(async (id: string) => {
     if (!id) return;
     try {
-      const roleParam = isTeacher ? '?role=host' : '?role=student';
-      const res = await fetch(`/api/rooms/${id}${roleParam}`);
+      const headers = getHostAuthHeaders(id);
+      const res = await fetch(`/api/rooms/${id}`, { headers });
       if (res.ok) {
         const data: Room = await res.json();
         setRoom(data);
@@ -711,23 +722,14 @@ export default function App() {
             setView('leaderboard');
             sounds.playFanfare();
             confetti({ particleCount: 150, spread: 90, origin: { y: 0.5 } });
-
-            // Record game to school records for admin analytics
-            const studentResults = Object.values(data.students || {}).map(s => ({
-              name: s.name,
-              score: s.score,
-              correctCount: s.correctCount,
-              totalAnswered: s.answers?.length || 10,
-              streak: s.streak
-            }));
-            recordGameParticipation(studentResults);
+            // Results are recorded authoritatively on the server to prevent browser duplicates
           }
         }
       }
     } catch {
       // ignore
     }
-  }, [view, isTeacher]);
+  }, [view]);
 
   useEffect(() => {
     if (roomId && (view === 'lobby' || view === 'leaderboard' || view === 'game')) {
@@ -781,6 +783,9 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.roomId && data.room) {
+        if (data.hostToken) {
+          setRoomHostToken(data.roomId, data.hostToken);
+        }
         setRoomId(data.roomId);
         setRoom(data.room);
         setIsTeacher(true);
@@ -827,7 +832,8 @@ export default function App() {
     if (!roomId) return;
     try {
       await fetch(`/api/rooms/${roomId}/add-test-student`, {
-        method: 'POST'
+        method: 'POST',
+        headers: getHostAuthHeaders(roomId)
       });
       fetchRoom(roomId);
     } catch {
@@ -1277,7 +1283,10 @@ export default function App() {
               <button
                 onClick={async () => {
                   sounds.playTap();
-                  await fetch(`/api/rooms/${roomId}/start`, { method: 'POST' });
+                  await fetch(`/api/rooms/${roomId}/start`, {
+                    method: 'POST',
+                    headers: getHostAuthHeaders(roomId)
+                  });
                   setView('game');
                 }}
                 disabled={studentList.length === 0}
@@ -1335,7 +1344,10 @@ export default function App() {
           activeRoomsCount={activeRoomsCount}
           onOpenActiveRooms={() => setIsActiveRoomsOpen(true)}
           onEndGame={async () => {
-            await fetch(`/api/rooms/${roomId}/end`, { method: 'POST' });
+            await fetch(`/api/rooms/${roomId}/end`, {
+              method: 'POST',
+              headers: getHostAuthHeaders(roomId)
+            });
             setView('leaderboard');
           }}
           onRoomUpdate={setRoom}

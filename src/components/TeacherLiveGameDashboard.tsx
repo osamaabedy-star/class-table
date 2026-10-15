@@ -49,6 +49,7 @@ import { toHindi } from '../utils/format';
 import { sounds } from '../utils/audio';
 import { RiyadhEbdaaLogo } from './RiyadhEbdaaLogo';
 import { getPublicUrl, copyToClipboard } from '../utils/publicUrl';
+import { getHostAuthHeaders } from '../utils/auth';
 
 export interface StudentAnswer {
   questionIndex: number;
@@ -223,7 +224,10 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     setIsSkipping(true);
     sounds.playTap();
     try {
-      const res = await fetch(`/api/rooms/${roomId}/next`, { method: 'POST' });
+      const res = await fetch(`/api/rooms/${roomId}/next`, {
+        method: 'POST',
+        headers: getHostAuthHeaders(roomId)
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.room && onRoomUpdate) {
@@ -244,7 +248,10 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
   const handlePrevQuestion = async () => {
     sounds.playTap();
     try {
-      const res = await fetch(`/api/rooms/${roomId}/prev`, { method: 'POST' });
+      const res = await fetch(`/api/rooms/${roomId}/prev`, {
+        method: 'POST',
+        headers: getHostAuthHeaders(roomId)
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.room && onRoomUpdate) {
@@ -263,7 +270,10 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
   const handleRepeatQuestion = async () => {
     sounds.playTap();
     try {
-      const res = await fetch(`/api/rooms/${roomId}/repeat`, { method: 'POST' });
+      const res = await fetch(`/api/rooms/${roomId}/repeat`, {
+        method: 'POST',
+        headers: getHostAuthHeaders(roomId)
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.room && onRoomUpdate) {
@@ -284,7 +294,10 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     setIsAddingBot(true);
     sounds.playTap();
     try {
-      const res = await fetch(`/api/rooms/${roomId}/add-test-student`, { method: 'POST' });
+      const res = await fetch(`/api/rooms/${roomId}/add-test-student`, {
+        method: 'POST',
+        headers: getHostAuthHeaders(roomId)
+      });
       if (res.ok && showToast) {
         showToast('تمت إضافة طالب تجريبي بنجاح');
       }

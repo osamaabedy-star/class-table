@@ -96,16 +96,53 @@ export async function syncStudentsListToServer(students: SchoolStudent[]): Promi
   }
 }
 
+const RECORDED_ROUNDS_KEY = 'riyadh_client_recorded_rounds';
+
+function getClientRecordedRounds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(RECORDED_ROUNDS_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {
+    // ignore
+  }
+  return new Set();
+}
+
+function addClientRecordedRound(id: string) {
+  if (typeof window === 'undefined' || !id) return;
+  try {
+    const s = getClientRecordedRounds();
+    s.add(id);
+    localStorage.setItem(RECORDED_ROUNDS_KEY, JSON.stringify([...s]));
+  } catch {
+    // ignore
+  }
+}
+
 /**
- * Record a game participation to server and local storage
+ * Record a game participation to server and local storage with idempotency roundId
  */
-export async function recordGameParticipation(results: Array<{
-  name: string;
-  score: number;
-  correctCount: number;
-  totalAnswered: number;
-  streak?: number;
-}>): Promise<void> {
+export async function recordGameParticipation(
+  results: Array<{
+    name: string;
+    score: number;
+    correctCount: number;
+    totalAnswered: number;
+    streak?: number;
+  }>,
+  roundId?: string
+): Promise<void> {
+  if (!Array.isArray(results) || results.length === 0) return;
+
+  const finalRoundId = (roundId || `direct_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`).trim();
+  const recorded = getClientRecordedRounds();
+  if (recorded.has(finalRoundId)) {
+    // Already recorded locally, skip to avoid double addition
+    return;
+  }
+  addClientRecordedRound(finalRoundId);
+
   // Update local storage first
   const current = loadSavedStudents();
   let updated = false;
@@ -146,17 +183,18 @@ export async function recordGameParticipation(results: Array<{
     saveStudentsList(updatedList);
   }
 
-  // Also push to server
+  // Also push to server with roundId
   try {
     await fetch('/api/school/record-game', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ results })
+      body: JSON.stringify({ results, roundId: finalRoundId })
     });
   } catch {
     // ignore
   }
 }
+
 
 export function parsePastedStudentNames(
   rawText: string,

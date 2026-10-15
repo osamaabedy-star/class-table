@@ -500,14 +500,17 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
         });
       });
 
-      // Record to server for admin analytics & honor rolls
+      // Generate a unique idempotent round ID for this test session
+      const directRoundId = `direct_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+      // Record to server for admin analytics & honor rolls with roundId
       recordGameParticipation(activeStudents.map(a => ({
         name: a.name,
         score: a.score,
         correctCount: a.correctAnswers,
         totalAnswered: a.totalAnswered,
         streak: a.correctAnswers
-      }))).catch(() => {});
+      })), directRoundId).catch(() => {});
 
       // Record complete test session to test database for deep analysis
       const totalCorrect = activeStudents.reduce((acc, s) => acc + s.correctAnswers, 0);
@@ -516,6 +519,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       const topStd = rankedActiveStudents[0];
 
       recordTestSessionToDatabase({
+        id: directRoundId,
         title: `اختبار ${SCHOOL_GRADES.find(g => g.id === selectedGradeId)?.name || 'الصف'} (${selectedSection === 'all' ? 'جميع الشعب' : `شعبة ${selectedSection}`})`,
         gradeId: selectedGradeId,
         gradeName: SCHOOL_GRADES.find(g => g.id === selectedGradeId)?.name || 'الصف الدراسي',

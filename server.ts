@@ -32,6 +32,29 @@ app.use((req: Request, res: Response, next) => {
   next();
 });
 
+// Helper: Verify Admin session token
+function isAuthorizedAdminToken(token?: string): boolean {
+  if (!token) return false;
+  if (activeAdminTokens.has(token)) return true;
+  const jwtSecret = process.env.JWT_SECRET || process.env.ADMIN_PASSWORD || 'riyadh_al_ebdaa_secret_key_2026';
+  try {
+    const [payloadBase64, sig] = token.split('.');
+    if (payloadBase64 && sig) {
+      const expectedSig = crypto.createHmac('sha256', jwtSecret).update(payloadBase64).digest('hex');
+      if (crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+        const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
+        if (payload && payload.exp && payload.exp > Date.now()) {
+          activeAdminTokens.add(token);
+          return true;
+        }
+      }
+    }
+  } catch {
+    // Invalid format
+  }
+  return false;
+}
+
 // Middleware: Verify Admin Authorization for sensitive mutations
 function requireAdminAuth(req: Request, res: Response, next: () => void) {
   const authHeader = req.headers.authorization;
@@ -40,25 +63,7 @@ function requireAdminAuth(req: Request, res: Response, next: () => void) {
     return;
   }
   const token = authHeader.split(' ')[1];
-  if (!activeAdminTokens.has(token)) {
-    // Also allow token if matches HMAC of secret
-    const jwtSecret = process.env.JWT_SECRET || process.env.ADMIN_PASSWORD || 'riyadh_al_ebdaa_secret_key_2026';
-    try {
-      const [payloadBase64, sig] = token.split('.');
-      if (payloadBase64 && sig) {
-        const expectedSig = crypto.createHmac('sha256', jwtSecret).update(payloadBase64).digest('hex');
-        if (crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
-          const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
-          if (payload && payload.exp && payload.exp > Date.now()) {
-            activeAdminTokens.add(token);
-            next();
-            return;
-          }
-        }
-      }
-    } catch {
-      // Invalid format
-    }
+  if (!isAuthorizedAdminToken(token)) {
     res.status(403).json({ error: 'انتهت صلاحية الجلسة أو الرمز غير صالح، يرجى تسجيل الدخول مجدداً' });
     return;
   }
@@ -111,6 +116,8 @@ export interface Room {
   intermissionEndsAt: number;
   students: Record<string, Student>;
   createdAt: number;
+  hostToken?: string;
+  resultsRecorded?: boolean;
 }
 
 // Room persistence across serverless container invocations via /tmp and workspace root
@@ -157,6 +164,181 @@ function getRoom(roomId: string | undefined): Room | undefined {
 }
 
 loadRooms();
+
+// Recorded game rounds idempotency tracking
+const RECORDED_GAMES_FILE = process.env.VERCEL ? '/tmp/riyadh_recorded_games.json' : join(__dirname, 'recorded_games.json');
+let recordedGameIds = new Set<string>();
+
+function loadRecordedGameIds(): Set<string> {
+  try {
+    if (fs.existsSync(RECORDED_GAMES_FILE)) {
+      const data = fs.readFileSync(RECORDED_GAMES_FILE, 'utf-8');
+      const list = JSON.parse(data);
+      if (Array.isArray(list)) {
+        list.forEach(id => {
+          if (typeof id === 'string' && id.trim()) {
+            recordedGameIds.add(id.trim());
+          }
+        });
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return recordedGameIds;
+}
+
+function saveRecordedGameIds() {
+  try {
+    fs.writeFileSync(RECORDED_GAMES_FILE, JSON.stringify([...recordedGameIds], null, 2), 'utf-8');
+  } catch (e) {
+    // In read-only serverless environment, in-memory Set maintains state
+  }
+}
+
+loadRecordedGameIds();
+
+// Verify if caller is authorized host of the room
+function isAuthorizedHost(req: Request, room: Room): boolean {
+  if (!room) return false;
+  // 1. Direct host token in header
+  const headerToken = (req.headers['x-host-token'] as string || '').trim();
+  if (headerToken && room.hostToken && headerToken === room.hostToken) {
+    return true;
+  }
+  // 2. Direct host token in query or body
+  const queryToken = (req.query.hostToken as string || '').trim();
+  if (queryToken && room.hostToken && queryToken === room.hostToken) {
+    return true;
+  }
+  const bodyToken = (req.body?.hostToken as string || '').trim();
+  if (bodyToken && room.hostToken && bodyToken === room.hostToken) {
+    return true;
+  }
+  // 3. Admin authorization
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    if (isAuthorizedAdminToken(token)) {
+      return true;
+    }
+  }
+  // CRITICAL: query role=host is NOT accepted!
+  return false;
+}
+
+// Sanitize room data for client responses, masking answers for students
+function sanitizeRoomForClient(room: Room, isHost: boolean) {
+  const sanitizedQuestions = room.questions.map((q, idx) => {
+    // If host, or question has passed, the answer is visible
+    const hasPassed = idx < room.currentQuestionIndex;
+    return {
+      ...q,
+      answer: (isHost || hasPassed) ? q.answer : 0
+    };
+  });
+
+  return {
+    id: room.id,
+    title: room.title,
+    roomType: room.roomType,
+    status: room.status,
+    config: room.config,
+    questions: sanitizedQuestions,
+    currentQuestionIndex: room.currentQuestionIndex,
+    questionStartedAt: room.questionStartedAt,
+    intermissionEndsAt: room.intermissionEndsAt,
+    students: room.students,
+    createdAt: room.createdAt,
+    resultsRecorded: room.resultsRecorded || false
+  };
+}
+
+// Apply results safely to school students database
+function applyResultsToSchoolStudents(results: Array<{ name: string; score: number; correctCount: number; totalAnswered: number; streak?: number }>): number {
+  if (!Array.isArray(results) || results.length === 0) return 0;
+  const current = loadSchoolStudents();
+  let updatedCount = 0;
+
+  for (const item of results) {
+    const rawName = (item.name || '').trim();
+    if (!rawName || rawName.includes('تجريبي')) continue;
+
+    let student = current.find(s => s.name.trim() === rawName);
+    if (!student) {
+      student = {
+        id: `student-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: rawName,
+        gradeId: 'grade4',
+        gradeName: 'الصف الدراسي',
+        section: 'أ',
+        level: 1,
+        participationCount: 0,
+        lastActiveDate: 'اليوم',
+        totalScore: 0,
+        correctCount: 0,
+        totalAnswered: 0,
+        bestStreak: 0
+      };
+      current.push(student);
+    }
+
+    // Validate boundaries to prevent corrupted values
+    const safeScore = Math.max(0, Math.min(1000, Number(item.score) || 0));
+    const safeCorrect = Math.max(0, Math.min(1000, Number(item.correctCount) || 0));
+    const safeAnswered = Math.max(safeCorrect, Math.min(1000, Number(item.totalAnswered) || 0));
+    const safeStreak = Math.max(0, Math.min(1000, Number(item.streak) || 0));
+
+    student.totalScore = (student.totalScore || 0) + safeScore;
+    student.correctCount = (student.correctCount || 0) + safeCorrect;
+    student.totalAnswered = (student.totalAnswered || 0) + safeAnswered;
+    student.participationCount = (student.participationCount || 0) + 1;
+    student.bestStreak = Math.max(student.bestStreak || 0, safeStreak);
+    student.lastActiveDate = 'اليوم';
+
+    // Update level based on score
+    if (student.totalScore > 1000) student.level = 5;
+    else if (student.totalScore > 600) student.level = 4;
+    else if (student.totalScore > 300) student.level = 3;
+    else if (student.totalScore > 100) student.level = 2;
+    else student.level = 1;
+
+    updatedCount++;
+  }
+
+  if (updatedCount > 0) {
+    saveSchoolStudents(current);
+  }
+  return updatedCount;
+}
+
+// Server-authoritative room completion recording (Strictly idempotent)
+function recordRoomCompletionOnServer(room: Room) {
+  if (room.resultsRecorded) return;
+  room.resultsRecorded = true;
+  saveRooms();
+
+  const roundId = `room_${room.id}_${room.createdAt}`;
+  if (recordedGameIds.has(roundId)) return;
+  recordedGameIds.add(roundId);
+  saveRecordedGameIds();
+
+  // Extract non-test student scores
+  const studentResults = Object.values(room.students || {})
+    .filter(s => s && s.name && !s.name.includes('تجريبي'))
+    .map(s => ({
+      name: s.name,
+      score: s.score || 0,
+      correctCount: s.correctCount || 0,
+      totalAnswered: s.answers?.length || room.questions.length,
+      streak: s.streak || 0
+    }));
+
+  if (studentResults.length > 0) {
+    applyResultsToSchoolStudents(studentResults);
+  }
+}
+
 
 function shuffle<T>(array: T[]): T[] {
   const arr = [...array];
@@ -265,6 +447,7 @@ function updateRoomState(room: Room) {
         room.questionStartedAt = now;
       } else {
         room.status = 'finished';
+        recordRoomCompletionOnServer(room);
       }
     }
     return;
@@ -352,6 +535,7 @@ app.post('/api/rooms', (req: Request, res: Response) => {
   }
 
   const questions = generateRoomQuestions(tables, questionsCount, mode);
+  const hostToken = crypto.randomBytes(24).toString('hex');
 
   rooms[roomId] = {
     id: roomId,
@@ -369,12 +553,18 @@ app.post('/api/rooms', (req: Request, res: Response) => {
     questionStartedAt: 0,
     intermissionEndsAt: 0,
     students: {},
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    hostToken,
+    resultsRecorded: false
   };
 
   saveRooms();
 
-  res.json({ roomId, room: rooms[roomId] });
+  res.json({
+    roomId,
+    hostToken,
+    room: sanitizeRoomForClient(rooms[roomId], true)
+  });
 });
 
 // 1.5 Get all active rooms (supports concurrent rooms dashboard)
@@ -411,25 +601,9 @@ app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
   }
   updateRoomState(room);
 
-  // If request contains role=student or no admin auth token, sanitize answers of questions
-  const isHost = req.query.role === 'host' || req.headers.authorization?.startsWith('Bearer ');
-  if (!isHost) {
-    const sanitizedQuestions = room.questions.map((q, idx) => {
-      // If question has passed or currently in intermission, student can see answer, otherwise hide it
-      const hasPassed = idx < room.currentQuestionIndex;
-      return {
-        ...q,
-        answer: hasPassed ? q.answer : 0 // Answer hidden until evaluated server-side
-      };
-    });
-    res.json({
-      ...room,
-      questions: sanitizedQuestions
-    });
-    return;
-  }
-
-  res.json(room);
+  // Secure authorization check: query role=host is NOT allowed
+  const isHost = isAuthorizedHost(req, room);
+  res.json(sanitizeRoomForClient(room, isHost));
 });
 
 // 3. Join room
@@ -473,10 +647,11 @@ app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
 
   saveRooms();
 
-  res.json({ success: true, room });
+  // Joining student is always sanitized as non-host
+  res.json({ success: true, room: sanitizeRoomForClient(room, false) });
 });
 
-// 4. Start room manually (for teacher or host)
+// 4. Start room manually (Protected: Host or Admin required)
 app.post('/api/rooms/:roomId/start', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const room = getRoom(roomId);
@@ -484,11 +659,15 @@ app.post('/api/rooms/:roomId/start', (req: Request, res: Response) => {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
   }
+  if (!isAuthorizedHost(req, room)) {
+    res.status(403).json({ error: 'غير مصرح: يتطلب إذن مسؤول الغرفة لبدء المسابقة' });
+    return;
+  }
   room.status = 'playing';
   room.currentQuestionIndex = 0;
   room.questionStartedAt = Date.now();
   saveRooms();
-  res.json({ success: true, room });
+  res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
 // 5. Submit answer (instant score calculation & 3s intermission trigger)
@@ -554,23 +733,34 @@ app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
   });
 });
 
-// 6. Reset or end room
+// 6. Reset or end room (Protected: Host or Admin required)
 app.post('/api/rooms/:roomId/end', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const room = getRoom(roomId);
-  if (room) {
-    room.status = 'finished';
-    saveRooms();
+  if (!room) {
+    res.status(404).json({ error: 'الغرفة غير موجودة' });
+    return;
   }
-  res.json({ success: true, room });
+  if (!isAuthorizedHost(req, room)) {
+    res.status(403).json({ error: 'غير مصرح: يتطلب إذن مسؤول الغرفة لإنهاء المسابقة' });
+    return;
+  }
+  room.status = 'finished';
+  recordRoomCompletionOnServer(room);
+  saveRooms();
+  res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
-// 7. Advance / Skip to next question immediately by teacher
+// 7. Advance / Skip to next question immediately by teacher (Protected: Host or Admin required)
 app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
+    return;
+  }
+  if (!isAuthorizedHost(req, room)) {
+    res.status(403).json({ error: 'غير مصرح: يتطلب إذن مسؤول الغرفة للتنقل بين الأسئلة' });
     return;
   }
   const now = Date.now();
@@ -580,17 +770,22 @@ app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
     room.questionStartedAt = now;
   } else {
     room.status = 'finished';
+    recordRoomCompletionOnServer(room);
   }
   saveRooms();
-  res.json({ success: true, room });
+  res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
-// 8. Go back to previous question by teacher
+// 8. Go back to previous question by teacher (Protected: Host or Admin required)
 app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
+    return;
+  }
+  if (!isAuthorizedHost(req, room)) {
+    res.status(403).json({ error: 'غير مصرح: يتطلب إذن مسؤول الغرفة للرجوع للسؤال السابق' });
     return;
   }
   if (room.currentQuestionIndex > 0) {
@@ -599,10 +794,10 @@ app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
     room.questionStartedAt = Date.now();
   }
   saveRooms();
-  res.json({ success: true, room });
+  res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
-// 9. Repeat current question (reset answers for current index)
+// 9. Repeat current question (Protected: Host or Admin required; rolls back points to prevent duplication)
 app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const room = getRoom(roomId);
@@ -610,22 +805,49 @@ app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
   }
+  if (!isAuthorizedHost(req, room)) {
+    res.status(403).json({ error: 'غير مصرح: يتطلب إذن مسؤول الغرفة لإعادة السؤال' });
+    return;
+  }
   const qIdx = room.currentQuestionIndex;
+
+  // Cleanly roll back points and correct counts earned on this question to prevent doubling of scores
   Object.values(room.students).forEach(s => {
-    s.answers = s.answers.filter(a => a.questionIndex !== qIdx);
+    const prevAnswer = s.answers.find(a => a.questionIndex === qIdx);
+    if (prevAnswer) {
+      if (prevAnswer.isCorrect) {
+        s.score = Math.max(0, s.score - (prevAnswer.pointsEarned || 1));
+        s.correctCount = Math.max(0, s.correctCount - 1);
+      }
+      s.answers = s.answers.filter(a => a.questionIndex !== qIdx);
+
+      // Recalculate streak accurately from remaining answers
+      let streak = 0;
+      const sortedAnswers = [...s.answers].sort((a, b) => a.questionIndex - b.questionIndex);
+      for (const ans of sortedAnswers) {
+        if (ans.isCorrect) streak += 1;
+        else streak = 0;
+      }
+      s.streak = streak;
+    }
   });
+
   room.status = 'playing';
   room.questionStartedAt = Date.now();
   saveRooms();
-  res.json({ success: true, room });
+  res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
-// 10. Add mock/test student named "تجريبي" only
+// 10. Add mock/test student named "تجريبي" only (Protected: Host or Admin required)
 app.post('/api/rooms/:roomId/add-test-student', (req: Request, res: Response) => {
   const { roomId } = req.params;
   const room = getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
+    return;
+  }
+  if (!isAuthorizedHost(req, room)) {
+    res.status(403).json({ error: 'غير مصرح: يتطلب إذن مسؤول الغرفة' });
     return;
   }
   const studentCount = Object.keys(room.students).filter(k => k.includes('تجريبي')).length;
@@ -647,7 +869,8 @@ app.post('/api/rooms/:roomId/add-test-student', (req: Request, res: Response) =>
     room.questionStartedAt = Date.now();
   }
 
-  res.json({ success: true, room, addedName: testName });
+  saveRooms();
+  res.json({ success: true, room: sanitizeRoomForClient(room, true), addedName: testName });
 });
 
 // ============================================================
@@ -846,41 +1069,43 @@ app.delete('/api/school/students', requireAdminAuth, (req: Request, res: Respons
   res.json({ success: true, count: 0 });
 });
 
-// 6. Record game participation results into school roster
+// 6. Record game participation results into school roster (Idempotent & Protected)
 app.post('/api/school/record-game', (req: Request, res: Response) => {
-  const { results } = req.body;
+  const { results, roundId, roomId, hostToken } = req.body;
   if (!Array.isArray(results)) {
     res.status(400).json({ error: 'نتائج غير صالحة' });
     return;
   }
-  const current = loadSchoolStudents();
-  let updatedCount = 0;
 
-  for (const item of results) {
-    const student = current.find(s => s.name.trim() === (item.name || '').trim());
-    if (student) {
-      student.totalScore = (student.totalScore || 0) + (item.score || 0);
-      student.correctCount = (student.correctCount || 0) + (item.correctCount || 0);
-      student.totalAnswered = (student.totalAnswered || 0) + (item.totalAnswered || 0);
-      student.participationCount = (student.participationCount || 0) + 1;
-      student.bestStreak = Math.max(student.bestStreak || 0, item.streak || 0);
-      student.lastActiveDate = 'اليوم';
+  const finalRoundId = (roundId || roomId || '').trim();
+  if (!finalRoundId) {
+    res.status(400).json({ error: 'معرف الجولة مطلوب لمنع تكرار تسجيل النتائج' });
+    return;
+  }
 
-      // Update level based on score
-      if (student.totalScore > 1000) student.level = 5;
-      else if (student.totalScore > 600) student.level = 4;
-      else if (student.totalScore > 300) student.level = 3;
-      else if (student.totalScore > 100) student.level = 2;
-      else student.level = 1;
-
-      updatedCount++;
+  // If associated with an online room, verify caller is authorized host
+  if (roomId) {
+    const room = getRoom(roomId);
+    if (room) {
+      const isHost = isAuthorizedHost(req, room) || (hostToken && hostToken === room.hostToken);
+      if (!isHost) {
+        res.status(403).json({ error: 'غير مصرح: لا يمكن تسجيل نتائج الغرفة إلا من خلال الخادم أو المعلم المضيف' });
+        return;
+      }
     }
   }
 
-  if (updatedCount > 0) {
-    saveSchoolStudents(current);
+  // Idempotency check: if round already recorded, skip to prevent score duplication
+  if (recordedGameIds.has(finalRoundId)) {
+    res.json({ success: true, alreadyRecorded: true, message: 'تم تسجيل نتائج هذه الجولة مسبقاً' });
+    return;
   }
-  res.json({ success: true, updatedCount });
+
+  recordedGameIds.add(finalRoundId);
+  saveRecordedGameIds();
+
+  const updatedCount = applyResultsToSchoolStudents(results);
+  res.json({ success: true, updatedCount, roundId: finalRoundId });
 });
 
 // 7. Get comprehensive school analytics & honor rolls
@@ -1027,7 +1252,7 @@ app.get('/api/school/tests', (req: Request, res: Response) => {
   res.json({ tests });
 });
 
-// 9. Record a test session into the database
+// 9. Record a test session into the database (Protected against unauthorized modification)
 app.post('/api/school/tests', (req: Request, res: Response) => {
   const { test } = req.body;
   if (!test || !test.id) {
@@ -1037,8 +1262,20 @@ app.post('/api/school/tests', (req: Request, res: Response) => {
   const current = loadTestSessions();
   const existingIdx = current.findIndex(t => t.id === test.id);
   if (existingIdx >= 0) {
+    // Modifying existing test session requires Admin authorization
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : '';
+    if (!isAuthorizedAdminToken(token)) {
+      res.status(403).json({ error: 'غير مصرح: تعديل الاختبارات المسجلة سابقاً يتطلب صلاحية مسؤول النظام' });
+      return;
+    }
     current[existingIdx] = test;
   } else {
+    // Validate minimal structure for new test
+    if (!test.title || !test.gradeId || !Array.isArray(test.participants || test.activeStudents)) {
+      res.status(400).json({ error: 'بيانات الاختبار غير مكتملة أو غير صالحة' });
+      return;
+    }
     current.unshift(test); // newest first
   }
   saveTestSessions(current);

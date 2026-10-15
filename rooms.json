@@ -3,7 +3,7 @@
     "id": "4ZF6",
     "title": "تحدي جدول الضرب",
     "roomType": "duel",
-    "status": "playing",
+    "status": "intermission",
     "config": {
       "tables": [
         7
@@ -56,9 +56,9 @@
         "text": "7 × 11"
       }
     ],
-    "currentQuestionIndex": 0,
-    "questionStartedAt": 1791965845623,
-    "intermissionEndsAt": 0,
+    "currentQuestionIndex": 1,
+    "questionStartedAt": 1792052452783,
+    "intermissionEndsAt": 1792053676000,
     "students": {
       "عمر التميمي": {
         "name": "عمر التميمي",
@@ -90,5 +90,284 @@
       }
     },
     "createdAt": 1791965845609
+  },
+  "U4PC": {
+    "id": "U4PC",
+    "title": "اختبار الحماية والتحكم",
+    "roomType": "group",
+    "status": "playing",
+    "config": {
+      "tables": [
+        2,
+        3
+      ],
+      "questionsCount": 5,
+      "timePerQuestion": 10,
+      "mode": "multi"
+    },
+    "questions": [
+      {
+        "id": 1,
+        "a": 2,
+        "b": 4,
+        "operation": "×",
+        "answer": 8,
+        "options": [
+          8,
+          18,
+          10,
+          6
+        ],
+        "text": "2 × 4"
+      },
+      {
+        "id": 2,
+        "a": 3,
+        "b": 6,
+        "operation": "×",
+        "answer": 18,
+        "options": [
+          8,
+          20,
+          12,
+          18
+        ],
+        "text": "3 × 6"
+      },
+      {
+        "id": 3,
+        "a": 2,
+        "b": 8,
+        "operation": "×",
+        "answer": 16,
+        "options": [
+          16,
+          14,
+          8,
+          24
+        ],
+        "text": "2 × 8"
+      },
+      {
+        "id": 4,
+        "a": 3,
+        "b": 11,
+        "operation": "×",
+        "answer": 33,
+        "options": [
+          33,
+          44,
+          43,
+          22
+        ],
+        "text": "3 × 11"
+      },
+      {
+        "id": 5,
+        "a": 2,
+        "b": 1,
+        "operation": "×",
+        "answer": 2,
+        "options": [
+          4,
+          0,
+          2,
+          12
+        ],
+        "text": "2 × 1"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "questionStartedAt": 1792053675227,
+    "intermissionEndsAt": 0,
+    "students": {},
+    "createdAt": 1792053675196,
+    "hostToken": "e36bd06279db0ac6176da7f2f929d2d1b600687a33818b1a",
+    "resultsRecorded": false
+  },
+  "WCHY": {
+    "id": "WCHY",
+    "title": "اختبار الحماية والتحكم",
+    "roomType": "group",
+    "status": "finished",
+    "config": {
+      "tables": [
+        2,
+        3
+      ],
+      "questionsCount": 5,
+      "timePerQuestion": 10,
+      "mode": "multi"
+    },
+    "questions": [
+      {
+        "id": 1,
+        "a": 3,
+        "b": 1,
+        "operation": "×",
+        "answer": 3,
+        "options": [
+          3,
+          13,
+          2,
+          4
+        ],
+        "text": "3 × 1"
+      },
+      {
+        "id": 2,
+        "a": 3,
+        "b": 4,
+        "operation": "×",
+        "answer": 12,
+        "options": [
+          13,
+          2,
+          12,
+          15
+        ],
+        "text": "3 × 4"
+      },
+      {
+        "id": 3,
+        "a": 2,
+        "b": 12,
+        "operation": "×",
+        "answer": 24,
+        "options": [
+          12,
+          36,
+          24,
+          25
+        ],
+        "text": "2 × 12"
+      },
+      {
+        "id": 4,
+        "a": 3,
+        "b": 3,
+        "operation": "×",
+        "answer": 9,
+        "options": [
+          11,
+          9,
+          8,
+          19
+        ],
+        "text": "3 × 3"
+      },
+      {
+        "id": 5,
+        "a": 2,
+        "b": 4,
+        "operation": "×",
+        "answer": 8,
+        "options": [
+          6,
+          4,
+          8,
+          9
+        ],
+        "text": "2 × 4"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "questionStartedAt": 1792053808462,
+    "intermissionEndsAt": 1792053811473,
+    "students": {
+      "سعود الفهد": {
+        "name": "سعود الفهد",
+        "score": 1,
+        "currentIndex": 1,
+        "correctCount": 1,
+        "streak": 1,
+        "answers": [
+          {
+            "questionIndex": 0,
+            "selectedOption": 3,
+            "isCorrect": true,
+            "timeSpent": 2,
+            "pointsEarned": 1
+          }
+        ],
+        "lastActive": 1792053808464,
+        "completed": false
+      },
+      "ريان العتيبي": {
+        "name": "ريان العتيبي",
+        "score": 1,
+        "currentIndex": 1,
+        "correctCount": 1,
+        "streak": 1,
+        "answers": [
+          {
+            "questionIndex": 0,
+            "selectedOption": 3,
+            "isCorrect": true,
+            "timeSpent": 2,
+            "pointsEarned": 1
+          }
+        ],
+        "lastActive": 1792053808467,
+        "completed": false
+      },
+      "تركي القحطاني": {
+        "name": "تركي القحطاني",
+        "score": 1,
+        "currentIndex": 1,
+        "correctCount": 1,
+        "streak": 1,
+        "answers": [
+          {
+            "questionIndex": 0,
+            "selectedOption": 3,
+            "isCorrect": true,
+            "timeSpent": 2,
+            "pointsEarned": 1
+          }
+        ],
+        "lastActive": 1792053808469,
+        "completed": false
+      },
+      "عبدالله الشمري": {
+        "name": "عبدالله الشمري",
+        "score": 1,
+        "currentIndex": 1,
+        "correctCount": 1,
+        "streak": 1,
+        "answers": [
+          {
+            "questionIndex": 0,
+            "selectedOption": 3,
+            "isCorrect": true,
+            "timeSpent": 2,
+            "pointsEarned": 1
+          }
+        ],
+        "lastActive": 1792053808471,
+        "completed": false
+      },
+      "محمد الدوسري": {
+        "name": "محمد الدوسري",
+        "score": 1,
+        "currentIndex": 1,
+        "correctCount": 1,
+        "streak": 1,
+        "answers": [
+          {
+            "questionIndex": 0,
+            "selectedOption": 3,
+            "isCorrect": true,
+            "timeSpent": 2,
+            "pointsEarned": 1
+          }
+        ],
+        "lastActive": 1792053808473,
+        "completed": false
+      }
+    },
+    "createdAt": 1792053808416,
+    "hostToken": "a5b66364e88e87d91844e41f97e15b68bdef6aadcac479e7",
+    "resultsRecorded": true
   }
 }
