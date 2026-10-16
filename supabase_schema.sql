@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     host_token VARCHAR(100), -- رمز سري مخصص للمعلم المضيف (لا يُرسل للطلاب)
     config JSONB NOT NULL DEFAULT '{}'::jsonb, -- إعدادات الجداول والوقت ونوع العمليات
     questions JSONB NOT NULL DEFAULT '[]'::jsonb, -- مصفوفة الأسئلة
+    students JSONB NOT NULL DEFAULT '{}'::jsonb, -- مصفوفة وبيانات الطلاب المشاركين
     current_question_index INT NOT NULL DEFAULT 0,
     question_started_at BIGINT DEFAULT 0,
     intermission_ends_at BIGINT DEFAULT 0,

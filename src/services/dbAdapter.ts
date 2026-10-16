@@ -312,6 +312,7 @@ async function ensurePostgresSchema(): Promise<boolean> {
             host_token VARCHAR(100),
             config JSONB NOT NULL DEFAULT '{}'::jsonb,
             questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+            students JSONB NOT NULL DEFAULT '{}'::jsonb,
             current_question_index INT NOT NULL DEFAULT 0,
             question_started_at BIGINT DEFAULT 0,
             intermission_ends_at BIGINT DEFAULT 0,
@@ -319,6 +320,8 @@ async function ensurePostgresSchema(): Promise<boolean> {
             created_at BIGINT NOT NULL,
             updated_at TIMESTAMPTZ DEFAULT NOW()
           );
+
+          ALTER TABLE rooms ADD COLUMN IF NOT EXISTS students JSONB NOT NULL DEFAULT '{}'::jsonb;
 
           CREATE TABLE IF NOT EXISTS test_sessions (
             id VARCHAR(120) PRIMARY KEY,
@@ -1001,7 +1004,6 @@ export const dbAdapter = {
 
   async getRoom(id: string): Promise<Room | null> {
     const code = id.toUpperCase();
-    if (memoryRooms[code]) return memoryRooms[code];
 
     const hasDb = await ensurePostgresSchema();
     if (hasDb && pgPool) {
@@ -1009,7 +1011,7 @@ export const dbAdapter = {
         const res = await pgPool.query(`
           SELECT 
             id, title, room_type AS "roomType", status, host_token AS "hostToken",
-            config, questions, current_question_index AS "currentQuestionIndex",
+            config, questions, students, current_question_index AS "currentQuestionIndex",
             question_started_at AS "questionStartedAt", intermission_ends_at AS "intermissionEndsAt",
             results_recorded AS "resultsRecorded", created_at AS "createdAt"
           FROM rooms
@@ -1024,27 +1026,58 @@ export const dbAdapter = {
             roomType: row.roomType,
             status: row.status,
             hostToken: row.hostToken,
-            config: typeof row.config === 'string' ? JSON.parse(row.config) : row.config,
-            questions: typeof row.questions === 'string' ? JSON.parse(row.questions) : row.questions,
+            config: typeof row.config === 'string' ? JSON.parse(row.config) : (row.config || {}),
+            questions: typeof row.questions === 'string' ? JSON.parse(row.questions) : (row.questions || []),
+            students: typeof row.students === 'string' ? JSON.parse(row.students) : (row.students || {}),
             currentQuestionIndex: row.currentQuestionIndex,
             questionStartedAt: Number(row.questionStartedAt),
             intermissionEndsAt: Number(row.intermissionEndsAt),
             resultsRecorded: Boolean(row.resultsRecorded),
-            createdAt: Number(row.createdAt),
-            students: {}
+            createdAt: Number(row.createdAt)
           };
           memoryRooms[code] = room;
           return room;
         }
       } catch (e) {
-        console.warn('[Postgres getRoom failed, using memory]', e);
+        console.warn('[Postgres getRoom failed, using memory fallback]', e);
       }
     }
 
-    return null;
+    return memoryRooms[code] || null;
   },
 
   async getAllRooms(): Promise<Room[]> {
+    const hasDb = await ensurePostgresSchema();
+    if (hasDb && pgPool) {
+      try {
+        const res = await pgPool.query(`
+          SELECT 
+            id, title, room_type AS "roomType", status, host_token AS "hostToken",
+            config, questions, students, current_question_index AS "currentQuestionIndex",
+            question_started_at AS "questionStartedAt", intermission_ends_at AS "intermissionEndsAt",
+            results_recorded AS "resultsRecorded", created_at AS "createdAt"
+          FROM rooms
+          ORDER BY created_at DESC;
+        `);
+        return res.rows.map(row => ({
+          id: row.id,
+          title: row.title,
+          roomType: row.roomType,
+          status: row.status,
+          hostToken: row.hostToken,
+          config: typeof row.config === 'string' ? JSON.parse(row.config) : (row.config || {}),
+          questions: typeof row.questions === 'string' ? JSON.parse(row.questions) : (row.questions || []),
+          students: typeof row.students === 'string' ? JSON.parse(row.students) : (row.students || {}),
+          currentQuestionIndex: row.currentQuestionIndex,
+          questionStartedAt: Number(row.questionStartedAt),
+          intermissionEndsAt: Number(row.intermissionEndsAt),
+          resultsRecorded: Boolean(row.resultsRecorded),
+          createdAt: Number(row.createdAt)
+        }));
+      } catch (e) {
+        // fallback
+      }
+    }
     return Object.values(memoryRooms);
   },
 
@@ -1058,10 +1091,10 @@ export const dbAdapter = {
       try {
         await pgPool.query(`
           INSERT INTO rooms (
-            id, title, room_type, status, host_token, config, questions,
+            id, title, room_type, status, host_token, config, questions, students,
             current_question_index, question_started_at, intermission_ends_at,
             results_recorded, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
           ON CONFLICT (id) DO UPDATE SET
             title = EXCLUDED.title,
             room_type = EXCLUDED.room_type,
@@ -1069,6 +1102,7 @@ export const dbAdapter = {
             host_token = EXCLUDED.host_token,
             config = EXCLUDED.config,
             questions = EXCLUDED.questions,
+            students = EXCLUDED.students,
             current_question_index = EXCLUDED.current_question_index,
             question_started_at = EXCLUDED.question_started_at,
             intermission_ends_at = EXCLUDED.intermission_ends_at,
@@ -1077,12 +1111,13 @@ export const dbAdapter = {
         `, [
           code, room.title, room.roomType, room.status, room.hostToken || null,
           JSON.stringify(room.config || {}), JSON.stringify(room.questions || []),
+          JSON.stringify(room.students || {}),
           room.currentQuestionIndex || 0, room.questionStartedAt || 0,
           room.intermissionEndsAt || 0, Boolean(room.resultsRecorded),
           room.createdAt || Date.now()
         ]);
       } catch (e) {
-        // Rooms can remain in-memory if DB update encounters any transient issue
+        console.error('[Postgres saveRoom error]:', e);
       }
     }
   },

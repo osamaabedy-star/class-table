@@ -446,5 +446,204 @@
     "createdAt": 1792151306216,
     "hostToken": "4051d1dd0a3e80c1431b0839b13b2d39e2c15aae98acd1ac",
     "resultsRecorded": false
+  },
+  "9BN3": {
+    "id": "9BN3",
+    "title": "تحدي جدول الضرب",
+    "roomType": "duel",
+    "status": "lobby",
+    "config": {
+      "tables": [
+        3,
+        4
+      ],
+      "questionsCount": 5,
+      "timePerQuestion": 10,
+      "mode": "multi"
+    },
+    "questions": [
+      {
+        "id": 1,
+        "a": 4,
+        "b": 12,
+        "operation": "×",
+        "answer": 48,
+        "options": [
+          48,
+          58,
+          49,
+          38
+        ],
+        "text": "4 × 12"
+      },
+      {
+        "id": 2,
+        "a": 4,
+        "b": 5,
+        "operation": "×",
+        "answer": 20,
+        "options": [
+          20,
+          24,
+          10,
+          16
+        ],
+        "text": "4 × 5"
+      },
+      {
+        "id": 3,
+        "a": 4,
+        "b": 4,
+        "operation": "×",
+        "answer": 16,
+        "options": [
+          17,
+          20,
+          16,
+          14
+        ],
+        "text": "4 × 4"
+      },
+      {
+        "id": 4,
+        "a": 4,
+        "b": 9,
+        "operation": "×",
+        "answer": 36,
+        "options": [
+          36,
+          26,
+          45,
+          37
+        ],
+        "text": "4 × 9"
+      },
+      {
+        "id": 5,
+        "a": 4,
+        "b": 2,
+        "operation": "×",
+        "answer": 8,
+        "options": [
+          8,
+          10,
+          6,
+          4
+        ],
+        "text": "4 × 2"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "questionStartedAt": 0,
+    "intermissionEndsAt": 0,
+    "students": {},
+    "createdAt": 1792152857587,
+    "hostToken": "251ebf016c08de6990630fbc9561116948d53fe4d64f19bf",
+    "resultsRecorded": false
+  },
+  "G47F": {
+    "id": "G47F",
+    "title": "تحدي جدول الضرب",
+    "roomType": "duel",
+    "status": "lobby",
+    "config": {
+      "tables": [
+        2,
+        5
+      ],
+      "questionsCount": 5,
+      "timePerQuestion": 10,
+      "mode": "multi"
+    },
+    "questions": [
+      {
+        "id": 1,
+        "a": 2,
+        "b": 4,
+        "operation": "×",
+        "answer": 8,
+        "options": [
+          12,
+          8,
+          4,
+          6
+        ],
+        "text": "2 × 4"
+      },
+      {
+        "id": 2,
+        "a": 2,
+        "b": 10,
+        "operation": "×",
+        "answer": 20,
+        "options": [
+          22,
+          20,
+          18,
+          19
+        ],
+        "text": "2 × 10"
+      },
+      {
+        "id": 3,
+        "a": 2,
+        "b": 12,
+        "operation": "×",
+        "answer": 24,
+        "options": [
+          26,
+          24,
+          23,
+          25
+        ],
+        "text": "2 × 12"
+      },
+      {
+        "id": 4,
+        "a": 2,
+        "b": 11,
+        "operation": "×",
+        "answer": 22,
+        "options": [
+          11,
+          23,
+          22,
+          24
+        ],
+        "text": "2 × 11"
+      },
+      {
+        "id": 5,
+        "a": 5,
+        "b": 8,
+        "operation": "×",
+        "answer": 40,
+        "options": [
+          40,
+          41,
+          32,
+          35
+        ],
+        "text": "5 × 8"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "questionStartedAt": 0,
+    "intermissionEndsAt": 0,
+    "students": {
+      "طالب متميز": {
+        "name": "طالب متميز",
+        "score": 0,
+        "currentIndex": 0,
+        "correctCount": 0,
+        "streak": 0,
+        "answers": [],
+        "lastActive": 1792152889163,
+        "completed": false
+      }
+    },
+    "createdAt": 1792152889151,
+    "hostToken": "a77c1749eae442fa7bc7e3a593beef7229e5b26b577a7f55",
+    "resultsRecorded": false
   }
 }

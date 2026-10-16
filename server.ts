@@ -25,7 +25,50 @@ app.use((req: Request, res: Response, next) => {
     res.sendStatus(200);
     return;
   }
-  // Normalize URL if Vercel serverless rewrite removed or forwarded without /api
+  // 1. Reconstruct real request URL if passed via query param by Vercel rewrite
+  try {
+    const parsed = new URL(req.url, 'http://localhost');
+    const routeParam = parsed.searchParams.get('__route') || parsed.searchParams.get('route') || parsed.searchParams.get('__url');
+    if (routeParam) {
+      parsed.searchParams.delete('__route');
+      parsed.searchParams.delete('route');
+      parsed.searchParams.delete('__url');
+      const search = parsed.searchParams.toString();
+      req.url = (routeParam.startsWith('/') ? routeParam : '/' + routeParam) + (search ? `?${search}` : '');
+    }
+  } catch {}
+
+  // 2. Reconstruct real request URL if rewritten by Vercel serverless routing headers
+  const matchedPath = (
+    req.headers['x-matched-path'] ||
+    req.headers['x-vercel-matched-path'] ||
+    req.headers['x-forwarded-uri'] ||
+    req.headers['x-original-uri'] ||
+    ''
+  ) as string;
+
+  if (matchedPath && matchedPath.startsWith('/api') && !matchedPath.startsWith('/api/index') && req.url !== matchedPath) {
+    req.url = matchedPath;
+  }
+
+  // 3. Fallback check for x-now-route-matches
+  if ((!req.url || req.url === '/' || req.url === '/api' || req.url.startsWith('/api/index')) && req.headers['x-now-route-matches']) {
+    const headerStr = String(req.headers['x-now-route-matches']);
+    const match = headerStr.match(/1=([^&]+)/);
+    if (match && match[1]) {
+      const decoded = decodeURIComponent(match[1]);
+      req.url = '/api/' + (decoded.startsWith('/') ? decoded.slice(1) : decoded);
+    }
+  }
+
+  // 4. Strip /api/index prefix if still remaining
+  if (req.url.startsWith('/api/index/')) {
+    req.url = req.url.replace('/api/index/', '/api/');
+  } else if (req.url === '/api/index') {
+    req.url = '/api';
+  }
+
+  // 5. Normalize URL if rewrite removed or forwarded without /api
   if (!req.url.startsWith('/api') && (req.url.startsWith('/rooms') || req.url.startsWith('/school') || req.url.startsWith('/admin'))) {
     req.url = '/api' + req.url;
   }
@@ -149,26 +192,56 @@ function loadRooms(): Record<string, Room> {
   return rooms;
 }
 
-function saveRooms() {
+async function persistRoom(room: Room): Promise<void> {
+  const code = room.id.toUpperCase();
+  rooms[code] = room;
   try {
     fs.writeFileSync(ROOMS_DATA_FILE, JSON.stringify(rooms, null, 2), 'utf-8');
   } catch (e) {
     // In read-only fallback, memory cache maintains state
   }
-  // Sync to dbAdapter for cloud persistence
+  // Await saving to dbAdapter for guaranteed cloud persistence across Vercel instances
   try {
-    Object.values(rooms).forEach(r => {
-      dbAdapter.saveRoom(r).catch(() => {});
-    });
-  } catch {
-    // ignore
+    await dbAdapter.saveRoom(room);
+  } catch (err) {
+    console.error(`[Storage] Failed to save room ${room.id} to dbAdapter:`, err);
   }
 }
 
-function getRoom(roomId: string | undefined): Room | undefined {
+async function saveRooms(room?: Room): Promise<void> {
+  if (room) {
+    await persistRoom(room);
+  } else {
+    try {
+      fs.writeFileSync(ROOMS_DATA_FILE, JSON.stringify(rooms, null, 2), 'utf-8');
+    } catch {}
+    await Promise.all(Object.values(rooms).map(r => dbAdapter.saveRoom(r).catch(() => {})));
+  }
+}
+
+async function getRoom(roomId: string | undefined): Promise<Room | undefined> {
   if (!roomId) return undefined;
+  const code = roomId.toUpperCase();
+
+  // 1. Query persistent dbAdapter first to ensure cross-container synchronization on Vercel
+  try {
+    const dbRoom = await dbAdapter.getRoom(code);
+    if (dbRoom) {
+      rooms[code] = dbRoom as Room;
+      return rooms[code];
+    }
+  } catch (e) {
+    console.warn(`[Storage] getRoom(${code}) from dbAdapter encountered error:`, e);
+  }
+
+  // 2. Check local memory
+  if (rooms[code]) {
+    return rooms[code];
+  }
+
+  // 3. Fallback to local file load
   loadRooms();
-  return rooms[roomId.toUpperCase()];
+  return rooms[code];
 }
 
 loadRooms();
@@ -321,10 +394,10 @@ function applyResultsToSchoolStudents(results: Array<{ name: string; score: numb
 }
 
 // Server-authoritative room completion recording (Strictly idempotent)
-function recordRoomCompletionOnServer(room: Room) {
+async function recordRoomCompletionOnServer(room: Room): Promise<void> {
   if (room.resultsRecorded) return;
   room.resultsRecorded = true;
-  saveRooms();
+  await persistRoom(room);
 
   const roundId = `room_${room.id}_${room.createdAt}`;
   if (recordedGameIds.has(roundId)) return;
@@ -344,8 +417,15 @@ function recordRoomCompletionOnServer(room: Room) {
 
   if (studentResults.length > 0) {
     applyResultsToSchoolStudents(studentResults);
+    // Also persist into PostgreSQL database idempotently
+    try {
+      await dbAdapter.applyGameResults(studentResults, roundId, room.id);
+    } catch (e) {
+      console.warn('[Storage] recordRoomCompletionOnServer dbAdapter error:', e);
+    }
   }
 }
+
 
 
 function shuffle<T>(array: T[]): T[] {
@@ -519,7 +599,7 @@ function updateRoomState(room: Room) {
 }
 
 // 1. Create room (Supports unlimited concurrent rooms with diagnostic tracking)
-app.post('/api/rooms', (req: Request, res: Response) => {
+app.post('/api/rooms', async (req: Request, res: Response) => {
   const attemptId = (req.headers['x-attempt-id'] as string || req.body?.attemptId || `DIAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`).trim();
   console.log(`[Diagnostic][${attemptId}] === STAGE 2: Room Creation Request Received ===`);
   console.log(`[Diagnostic][${attemptId}] Server environment: VERCEL=${Boolean(process.env.VERCEL)}, PID=${process.pid}, Current memory rooms: ${Object.keys(rooms).length}`);
@@ -583,13 +663,11 @@ app.post('/api/rooms', (req: Request, res: Response) => {
       resultsRecorded: false
     };
 
-    rooms[roomId] = newRoom;
-
-    // Stage 3 Diagnostic check: Test persistence
+    // Stage 3 Diagnostic check: Await persistent storage
     try {
-      saveRooms();
+      await persistRoom(newRoom);
     } catch (saveErr: any) {
-      console.error(`[Diagnostic][${attemptId}] Stage 3 Failure: saveRooms threw error:`, saveErr?.message || saveErr);
+      console.error(`[Diagnostic][${attemptId}] Stage 3 Failure: persistRoom threw error:`, saveErr?.message || saveErr);
       res.status(500).json({
         error: 'تم إنشاء الغرفة ولكن فشل حفظ بياناتها على الخادم',
         stage: 3,
@@ -598,9 +676,10 @@ app.post('/api/rooms', (req: Request, res: Response) => {
       return;
     }
 
-    // Verify room actually persisted in memory
-    if (!rooms[roomId]) {
-      console.error(`[Diagnostic][${attemptId}] Stage 3 Failure: Room ${roomId} missing in memory immediately after save`);
+    // Verify room actually persisted in storage
+    const verified = await getRoom(roomId);
+    if (!verified) {
+      console.error(`[Diagnostic][${attemptId}] Stage 3 Failure: Room ${roomId} missing in storage immediately after save`);
       res.status(500).json({
         error: 'تم إنشاء الغرفة ولكن فشل حفظ بياناتها على الخادم',
         stage: 3,
@@ -609,12 +688,12 @@ app.post('/api/rooms', (req: Request, res: Response) => {
       return;
     }
 
-    console.log(`[Diagnostic][${attemptId}] Stage 2 & 3 Success: Room ${roomId} created and saved in memory. Total active rooms: ${Object.keys(rooms).length}`);
+    console.log(`[Diagnostic][${attemptId}] Stage 2 & 3 Success: Room ${roomId} created and saved in persistent storage. Total active rooms: ${Object.keys(rooms).length}`);
 
     res.json({
       roomId,
       hostToken,
-      room: sanitizeRoomForClient(rooms[roomId], true),
+      room: sanitizeRoomForClient(verified, true),
       attemptId,
       stage: 0
     });
@@ -629,8 +708,9 @@ app.post('/api/rooms', (req: Request, res: Response) => {
 });
 
 // 1.5 Get all active rooms (supports concurrent rooms dashboard)
-app.get('/api/rooms', (req: Request, res: Response) => {
-  const roomList = Object.values(rooms).map(r => {
+app.get('/api/rooms', async (req: Request, res: Response) => {
+  const allRooms = await dbAdapter.getAllRooms();
+  const roomList = allRooms.map(r => {
     updateRoomState(r);
     return {
       id: r.id,
@@ -639,8 +719,8 @@ app.get('/api/rooms', (req: Request, res: Response) => {
       status: r.status,
       currentQuestionIndex: r.currentQuestionIndex,
       totalQuestions: r.questions.length,
-      studentCount: Object.keys(r.students).length,
-      students: Object.values(r.students).map(s => ({
+      studentCount: Object.keys(r.students || {}).length,
+      students: Object.values(r.students || {}).map(s => ({
         name: s.name,
         score: s.score,
         correctCount: s.correctCount
@@ -653,14 +733,14 @@ app.get('/api/rooms', (req: Request, res: Response) => {
 });
 
 // 2. Get room details (with auto-advancing check & diagnostic stage logging)
-app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
+app.get('/api/rooms/:roomId', async (req: Request, res: Response) => {
   const attemptId = (req.headers['x-attempt-id'] as string || req.query.attemptId as string || `DIAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`).trim();
   const { roomId } = req.params;
   const cleanCode = (roomId || '').trim().toUpperCase();
 
-  const room = getRoom(cleanCode);
+  const room = await getRoom(cleanCode);
   if (!room) {
-    console.warn(`[Diagnostic][${attemptId}] Stage 5: Room "${cleanCode}" not found in getRoom. Memory room count: ${Object.keys(rooms).length}, File exists: ${fs.existsSync(ROOMS_DATA_FILE)}`);
+    console.warn(`[Diagnostic][${attemptId}] Stage 5: Room "${cleanCode}" not found in persistent storage.`);
     res.status(404).json({
       error: `لم يتم العثور على رمز الغرفة المطلوب: ${cleanCode}`,
       stage: 5,
@@ -670,8 +750,9 @@ app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
     return;
   }
 
-  console.log(`[Diagnostic][${attemptId}] Stage 4/5 Check: Room "${cleanCode}" retrieved successfully. Status: ${room.status}, Students: ${Object.keys(room.students).length}`);
+  console.log(`[Diagnostic][${attemptId}] Stage 4/5 Check: Room "${cleanCode}" retrieved successfully. Status: ${room.status}, Students: ${Object.keys(room.students || {}).length}`);
   updateRoomState(room);
+  await persistRoom(room);
 
   // Secure authorization check: query role=host is NOT allowed
   const isHost = isAuthorizedHost(req, room);
@@ -682,7 +763,7 @@ app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
 });
 
 // 3. Join room (with diagnostic stage logging)
-app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/join', async (req: Request, res: Response) => {
   const attemptId = (req.headers['x-attempt-id'] as string || req.body?.attemptId || `DIAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`).trim();
   const { roomId } = req.params;
   const cleanCode = (roomId || '').trim().toUpperCase();
@@ -690,7 +771,7 @@ app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
 
   console.log(`[Diagnostic][${attemptId}] Stage 6: Join request for room "${cleanCode}" with player: "${(name || '').trim()}"`);
 
-  const room = getRoom(cleanCode);
+  const room = await getRoom(cleanCode);
 
   if (!room) {
     console.warn(`[Diagnostic][${attemptId}] Stage 5: Cannot join room "${cleanCode}", room does not exist.`);
@@ -714,6 +795,7 @@ app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
   }
 
   try {
+    if (!room.students) room.students = {};
     if (!room.students[trimmedName]) {
       room.students[trimmedName] = {
         name: trimmedName,
@@ -736,7 +818,7 @@ app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
       room.questionStartedAt = Date.now();
     }
 
-    saveRooms();
+    await persistRoom(room);
     console.log(`[Diagnostic][${attemptId}] Stage 6 Success: Player "${trimmedName}" joined room "${cleanCode}" successfully.`);
 
     res.json({
@@ -755,9 +837,9 @@ app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
 });
 
 // 4. Start room manually (Protected: Host or Admin required)
-app.post('/api/rooms/:roomId/start', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/start', async (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = getRoom(roomId);
+  const room = await getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -769,15 +851,15 @@ app.post('/api/rooms/:roomId/start', (req: Request, res: Response) => {
   room.status = 'playing';
   room.currentQuestionIndex = 0;
   room.questionStartedAt = Date.now();
-  saveRooms();
+  await persistRoom(room);
   res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
 // 5. Submit answer (instant score calculation & 3s intermission trigger)
-app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/answer', async (req: Request, res: Response) => {
   const { roomId } = req.params;
   const { name, questionIndex, selectedOption, timeRemaining } = req.body;
-  const room = getRoom(roomId);
+  const room = await getRoom(roomId);
 
   if (!room || !room.students[name]) {
     res.status(404).json({ error: 'المتسابق أو الغرفة غير مسجل' });
@@ -823,7 +905,7 @@ app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
 
   // Trigger auto-advance check
   updateRoomState(room);
-  saveRooms();
+  await persistRoom(room);
 
   res.json({
     success: true,
@@ -837,9 +919,9 @@ app.post('/api/rooms/:roomId/answer', (req: Request, res: Response) => {
 });
 
 // 6. Reset or end room (Protected: Host or Admin required)
-app.post('/api/rooms/:roomId/end', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/end', async (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = getRoom(roomId);
+  const room = await getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -849,15 +931,15 @@ app.post('/api/rooms/:roomId/end', (req: Request, res: Response) => {
     return;
   }
   room.status = 'finished';
-  recordRoomCompletionOnServer(room);
-  saveRooms();
+  await recordRoomCompletionOnServer(room);
+  await persistRoom(room);
   res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
 // 7. Advance / Skip to next question immediately by teacher (Protected: Host or Admin required)
-app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/next', async (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = getRoom(roomId);
+  const room = await getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -873,16 +955,16 @@ app.post('/api/rooms/:roomId/next', (req: Request, res: Response) => {
     room.questionStartedAt = now;
   } else {
     room.status = 'finished';
-    recordRoomCompletionOnServer(room);
+    await recordRoomCompletionOnServer(room);
   }
-  saveRooms();
+  await persistRoom(room);
   res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
 // 8. Go back to previous question by teacher (Protected: Host or Admin required)
-app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/prev', async (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = getRoom(roomId);
+  const room = await getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -896,14 +978,14 @@ app.post('/api/rooms/:roomId/prev', (req: Request, res: Response) => {
     room.status = 'playing';
     room.questionStartedAt = Date.now();
   }
-  saveRooms();
+  await persistRoom(room);
   res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
 // 9. Repeat current question (Protected: Host or Admin required; rolls back points to prevent duplication)
-app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/repeat', async (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = getRoom(roomId);
+  const room = await getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -937,14 +1019,14 @@ app.post('/api/rooms/:roomId/repeat', (req: Request, res: Response) => {
 
   room.status = 'playing';
   room.questionStartedAt = Date.now();
-  saveRooms();
+  await persistRoom(room);
   res.json({ success: true, room: sanitizeRoomForClient(room, true) });
 });
 
 // 10. Add mock/test student named "تجريبي" only (Protected: Host or Admin required)
-app.post('/api/rooms/:roomId/add-test-student', (req: Request, res: Response) => {
+app.post('/api/rooms/:roomId/add-test-student', async (req: Request, res: Response) => {
   const { roomId } = req.params;
-  const room = getRoom(roomId);
+  const room = await getRoom(roomId);
   if (!room) {
     res.status(404).json({ error: 'الغرفة غير موجودة' });
     return;
@@ -972,7 +1054,7 @@ app.post('/api/rooms/:roomId/add-test-student', (req: Request, res: Response) =>
     room.questionStartedAt = Date.now();
   }
 
-  saveRooms();
+  await persistRoom(room);
   res.json({ success: true, room: sanitizeRoomForClient(room, true), addedName: testName });
 });
 
@@ -1173,7 +1255,7 @@ app.delete('/api/school/students', requireAdminAuth, (req: Request, res: Respons
 });
 
 // 6. Record game participation results into school roster (Idempotent & Protected)
-app.post('/api/school/record-game', (req: Request, res: Response) => {
+app.post('/api/school/record-game', async (req: Request, res: Response) => {
   const { results, roundId, roomId, hostToken } = req.body;
   if (!Array.isArray(results)) {
     res.status(400).json({ error: 'نتائج غير صالحة' });
@@ -1188,7 +1270,7 @@ app.post('/api/school/record-game', (req: Request, res: Response) => {
 
   // If associated with an online room, verify caller is authorized host
   if (roomId) {
-    const room = getRoom(roomId);
+    const room = await getRoom(roomId);
     if (room) {
       const isHost = isAuthorizedHost(req, room) || (hostToken && hostToken === room.hostToken);
       if (!isHost) {
@@ -1208,6 +1290,12 @@ app.post('/api/school/record-game', (req: Request, res: Response) => {
   saveRecordedGameIds();
 
   const updatedCount = applyResultsToSchoolStudents(results);
+  try {
+    await dbAdapter.applyGameResults(results, finalRoundId, roomId);
+  } catch (e) {
+    console.warn('[Storage] record-game dbAdapter error:', e);
+  }
+
   res.json({ success: true, updatedCount, roundId: finalRoundId });
 });
 
@@ -1444,47 +1532,105 @@ app.get('/api/admin/health', requireAdminAuth, (req: Request, res: Response) => 
   });
 });
 
+// 14. Real Database Connection & Query Test
+app.get('/api/school/db-test', async (req: Request, res: Response) => {
+  const start = Date.now();
+  try {
+    const status = await dbAdapter.getStorageStatus();
+    res.json({
+      success: true,
+      timestamp: Date.now(),
+      latencyMs: Date.now() - start,
+      ...status
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Database test failed',
+      timestamp: Date.now(),
+      latencyMs: Date.now() - start
+    });
+  }
+});
+
+// Root API status endpoint
+app.all(['/api', '/api/index'], (req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    message: 'Class Table API is running',
+    version: '2.0.0',
+    timestamp: Date.now()
+  });
+});
+
+// JSON 404 Handler for all unmatched /api routes (prevents returning HTML)
+app.use('/api', (req: Request, res: Response) => {
+  console.warn(`[API 404] Route not matched: ${req.method} ${req.url}`);
+  res.status(404).json({
+    error: `المسار المطلوب غير موجود على الخادم: ${req.method} ${req.url}`,
+    stage: 8,
+    method: req.method,
+    url: req.url
+  });
+});
+
+// JSON 500 Error Handler for uncaught Express errors (prevents returning HTML)
+app.use((err: any, req: Request, res: Response, next: any) => {
+  console.error('[API 500 Uncaught]:', err);
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: 'حدث خطأ داخلي في معالجة طلب الخادم',
+      details: err?.message || String(err),
+      stage: 8
+    });
+  }
+});
+
 // Serve web app only in standalone / local server (not inside Vercel serverless functions)
-if (!process.env.VERCEL) {
-  if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
-      res.sendFile(join(__dirname, 'dist', 'index.html'));
-    });
-  } else {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'custom',
-    });
-    app.use(vite.middlewares);
-    app.use('*', async (req, res) => {
-      const url = req.originalUrl;
-      try {
-        const indexPath = join(__dirname, 'index.html');
-        let template = fs.readFileSync(indexPath, 'utf-8');
-        template = await vite.transformIndexHtml(url, template);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-      } catch (e) {
-        vite.ssrFixStacktrace(e as Error);
-        res.status(500).end((e as Error).message);
-      }
+async function setupServer() {
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV === 'production') {
+      app.use(express.static(join(__dirname, 'dist')));
+      app.get('*', (req, res) => {
+        res.sendFile(join(__dirname, 'dist', 'index.html'));
+      });
+    } else {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'custom',
+      });
+      app.use(vite.middlewares);
+      app.use('*', async (req, res) => {
+        const url = req.originalUrl;
+        try {
+          const indexPath = join(__dirname, 'index.html');
+          let template = fs.readFileSync(indexPath, 'utf-8');
+          template = await vite.transformIndexHtml(url, template);
+          res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+        } catch (e) {
+          vite.ssrFixStacktrace(e as Error);
+          res.status(500).end((e as Error).message);
+        }
+      });
+    }
+
+    // Determine port: In AI Studio and Cloud Run, Nginx binds 8080 and proxies to port 3000.
+    // Dev server must always bind to 3000 (never 8080) to avoid EADDRINUSE.
+    const args = process.argv.slice(2);
+    const portArgIndex = args.indexOf('--port');
+    const portFromArgs = portArgIndex !== -1 && args[portArgIndex + 1] ? parseInt(args[portArgIndex + 1], 10) : null;
+    const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+    const port = portFromArgs || (envPort && envPort !== 8080 ? envPort : 3000);
+
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`Server running on port ${port}`);
     });
   }
 }
 
-// Determine port: In AI Studio and Cloud Run, Nginx binds 8080 and proxies to port 3000.
-// Dev server must always bind to 3000 (never 8080) to avoid EADDRINUSE.
-const args = process.argv.slice(2);
-const portArgIndex = args.indexOf('--port');
-const portFromArgs = portArgIndex !== -1 && args[portArgIndex + 1] ? parseInt(args[portArgIndex + 1], 10) : null;
-const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
-const port = portFromArgs || (envPort && envPort !== 8080 ? envPort : 3000);
-
-if (!process.env.VERCEL) {
-  app.listen(port, '0.0.0.0', () => {
-    console.log(`Server running on port ${port}`);
-  });
-}
+setupServer().catch(err => {
+  console.error('[Server Setup Error]:', err);
+});
 
 export default app;

@@ -819,18 +819,19 @@ export default function App() {
     }
 
     let data: any;
+    const responseText = await createRes.text();
     try {
-      data = await createRes.json();
+      data = JSON.parse(responseText);
     } catch (parseErr) {
-      console.error(`[Diagnostic][Client][${attemptId}] Stage 8 Failure (Non-JSON server response):`, parseErr);
-      showToast(formatDiagnosticMessage(8, attemptId, 'استجابة غير صالحة من الخادم'));
+      console.error(`[Diagnostic][Client][${attemptId}] Non-JSON server response (HTTP ${createRes.status}, Content-Type: "${createRes.headers.get('content-type')}"). Body snippet:`, responseText.substring(0, 300));
+      showToast(formatDiagnosticMessage(8, attemptId, `استجابة غير صالحة من الخادم (HTTP ${createRes.status})`));
       return;
     }
 
     if (!createRes.ok || !data.roomId || !data.room) {
       const stage = (data.stage && data.stage >= 1 && data.stage <= 8) 
         ? data.stage 
-        : (createRes.status === 500 ? 2 : 8);
+        : (createRes.status === 500 ? 2 : (createRes.status === 404 ? 2 : 8));
       console.error(`[Diagnostic][Client][${attemptId}] Stage ${stage} Failure:`, data);
       showToast(formatDiagnosticMessage(stage, data.attemptId || attemptId, data.error));
       return;
@@ -853,7 +854,16 @@ export default function App() {
         return;
       }
 
-      const verifiedRoom = await verifyRes.json();
+      const verifyText = await verifyRes.text();
+      let verifiedRoom: any;
+      try {
+        verifiedRoom = JSON.parse(verifyText);
+      } catch {
+        console.error(`[Diagnostic][Client][${attemptId}] Stage 4 Failure: Non-JSON verification response (HTTP ${verifyRes.status})`);
+        showToast(formatDiagnosticMessage(4, attemptId, `تعذر استرجاع بيانات الغرفة من الخادم (HTTP ${verifyRes.status})`));
+        return;
+      }
+
       console.log(`[Diagnostic][Client][${attemptId}] Stage 4 Verification Success: Room ${data.roomId} verified.`);
 
       if (data.hostToken) {
@@ -896,10 +906,12 @@ export default function App() {
     }
 
     let data: any;
+    const joinText = await res.text();
     try {
-      data = await res.json();
+      data = JSON.parse(joinText);
     } catch {
-      showToast(formatDiagnosticMessage(8, attemptId, 'استجابة غير صالحة من الخادم'));
+      console.error(`[Diagnostic][Client][${attemptId}] Non-JSON join response (HTTP ${res.status}, Content-Type: "${res.headers.get('content-type')}"). Body:`, joinText.substring(0, 300));
+      showToast(formatDiagnosticMessage(8, attemptId, `استجابة غير صالحة من الخادم (HTTP ${res.status})`));
       return;
     }
 
