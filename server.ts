@@ -518,61 +518,114 @@ function updateRoomState(room: Room) {
   }
 }
 
-// 1. Create room (Supports unlimited concurrent rooms)
+// 1. Create room (Supports unlimited concurrent rooms with diagnostic tracking)
 app.post('/api/rooms', (req: Request, res: Response) => {
-  const {
-    tables = [2, 3, 4, 5, 6, 7, 8, 9, 10],
-    questionsCount = 10,
-    timePerQuestion = 10,
-    mode = 'multi',
-    roomType = 'duel',
-    title = 'تحدي جدول الضرب'
-  } = req.body;
+  const attemptId = (req.headers['x-attempt-id'] as string || req.body?.attemptId || `DIAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`).trim();
+  console.log(`[Diagnostic][${attemptId}] === STAGE 2: Room Creation Request Received ===`);
+  console.log(`[Diagnostic][${attemptId}] Server environment: VERCEL=${Boolean(process.env.VERCEL)}, PID=${process.pid}, Current memory rooms: ${Object.keys(rooms).length}`);
 
-  // 4-character uppercase alphanumeric code
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let roomId = '';
-  for (let i = 0; i < 4; i++) {
-    roomId += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  while (rooms[roomId]) {
-    roomId = '';
+  try {
+    const {
+      tables = [2, 3, 4, 5, 6, 7, 8, 9, 10],
+      questionsCount = 10,
+      timePerQuestion = 10,
+      mode = 'multi',
+      roomType = 'duel',
+      title = 'تحدي جدول الضرب'
+    } = req.body;
+
+    // 4-character uppercase alphanumeric code
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let roomId = '';
     for (let i = 0; i < 4; i++) {
       roomId += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    while (rooms[roomId]) {
+      roomId = '';
+      for (let i = 0; i < 4; i++) {
+        roomId += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+    }
+
+    let questions: Question[];
+    try {
+      questions = generateRoomQuestions(tables, questionsCount, mode);
+    } catch (genErr: any) {
+      console.error(`[Diagnostic][${attemptId}] Stage 2 Failure: Question generation threw error:`, genErr?.message || genErr);
+      res.status(500).json({
+        error: 'فشل إنشاء الغرفة على الخادم',
+        stage: 2,
+        attemptId
+      });
+      return;
+    }
+
+    const hostToken = crypto.randomBytes(24).toString('hex');
+
+    const newRoom: Room = {
+      id: roomId,
+      title,
+      roomType,
+      status: 'lobby',
+      config: {
+        tables,
+        questionsCount: questions.length,
+        timePerQuestion,
+        mode
+      },
+      questions,
+      currentQuestionIndex: 0,
+      questionStartedAt: 0,
+      intermissionEndsAt: 0,
+      students: {},
+      createdAt: Date.now(),
+      hostToken,
+      resultsRecorded: false
+    };
+
+    rooms[roomId] = newRoom;
+
+    // Stage 3 Diagnostic check: Test persistence
+    try {
+      saveRooms();
+    } catch (saveErr: any) {
+      console.error(`[Diagnostic][${attemptId}] Stage 3 Failure: saveRooms threw error:`, saveErr?.message || saveErr);
+      res.status(500).json({
+        error: 'تم إنشاء الغرفة ولكن فشل حفظ بياناتها على الخادم',
+        stage: 3,
+        attemptId
+      });
+      return;
+    }
+
+    // Verify room actually persisted in memory
+    if (!rooms[roomId]) {
+      console.error(`[Diagnostic][${attemptId}] Stage 3 Failure: Room ${roomId} missing in memory immediately after save`);
+      res.status(500).json({
+        error: 'تم إنشاء الغرفة ولكن فشل حفظ بياناتها على الخادم',
+        stage: 3,
+        attemptId
+      });
+      return;
+    }
+
+    console.log(`[Diagnostic][${attemptId}] Stage 2 & 3 Success: Room ${roomId} created and saved in memory. Total active rooms: ${Object.keys(rooms).length}`);
+
+    res.json({
+      roomId,
+      hostToken,
+      room: sanitizeRoomForClient(rooms[roomId], true),
+      attemptId,
+      stage: 0
+    });
+  } catch (err: any) {
+    console.error(`[Diagnostic][${attemptId}] Unhandled Stage 8 Error in POST /api/rooms:`, err?.message || err);
+    res.status(500).json({
+      error: 'حدث خطأ غير معروف أثناء إنشاء الغرفة',
+      stage: 8,
+      attemptId
+    });
   }
-
-  const questions = generateRoomQuestions(tables, questionsCount, mode);
-  const hostToken = crypto.randomBytes(24).toString('hex');
-
-  rooms[roomId] = {
-    id: roomId,
-    title,
-    roomType,
-    status: 'lobby',
-    config: {
-      tables,
-      questionsCount: questions.length,
-      timePerQuestion,
-      mode
-    },
-    questions,
-    currentQuestionIndex: 0,
-    questionStartedAt: 0,
-    intermissionEndsAt: 0,
-    students: {},
-    createdAt: Date.now(),
-    hostToken,
-    resultsRecorded: false
-  };
-
-  saveRooms();
-
-  res.json({
-    roomId,
-    hostToken,
-    room: sanitizeRoomForClient(rooms[roomId], true)
-  });
 });
 
 // 1.5 Get all active rooms (supports concurrent rooms dashboard)
@@ -599,64 +652,106 @@ app.get('/api/rooms', (req: Request, res: Response) => {
   res.json({ rooms: roomList });
 });
 
-// 2. Get room details (with auto-advancing check & security answer masking for students)
+// 2. Get room details (with auto-advancing check & diagnostic stage logging)
 app.get('/api/rooms/:roomId', (req: Request, res: Response) => {
+  const attemptId = (req.headers['x-attempt-id'] as string || req.query.attemptId as string || `DIAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`).trim();
   const { roomId } = req.params;
-  const room = getRoom(roomId);
+  const cleanCode = (roomId || '').trim().toUpperCase();
+
+  const room = getRoom(cleanCode);
   if (!room) {
-    res.status(404).json({ error: 'الغرفة غير موجودة' });
+    console.warn(`[Diagnostic][${attemptId}] Stage 5: Room "${cleanCode}" not found in getRoom. Memory room count: ${Object.keys(rooms).length}, File exists: ${fs.existsSync(ROOMS_DATA_FILE)}`);
+    res.status(404).json({
+      error: `لم يتم العثور على رمز الغرفة المطلوب: ${cleanCode}`,
+      stage: 5,
+      attemptId,
+      roomId: cleanCode
+    });
     return;
   }
+
+  console.log(`[Diagnostic][${attemptId}] Stage 4/5 Check: Room "${cleanCode}" retrieved successfully. Status: ${room.status}, Students: ${Object.keys(room.students).length}`);
   updateRoomState(room);
 
   // Secure authorization check: query role=host is NOT allowed
   const isHost = isAuthorizedHost(req, room);
-  res.json(sanitizeRoomForClient(room, isHost));
+  res.json({
+    ...sanitizeRoomForClient(room, isHost),
+    attemptId
+  });
 });
 
-// 3. Join room
+// 3. Join room (with diagnostic stage logging)
 app.post('/api/rooms/:roomId/join', (req: Request, res: Response) => {
+  const attemptId = (req.headers['x-attempt-id'] as string || req.body?.attemptId || `DIAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2,6).toUpperCase()}`).trim();
   const { roomId } = req.params;
+  const cleanCode = (roomId || '').trim().toUpperCase();
   const { name } = req.body;
-  const room = getRoom(roomId);
+
+  console.log(`[Diagnostic][${attemptId}] Stage 6: Join request for room "${cleanCode}" with player: "${(name || '').trim()}"`);
+
+  const room = getRoom(cleanCode);
 
   if (!room) {
-    res.status(404).json({ error: 'رمز الغرفة غير صحيح' });
+    console.warn(`[Diagnostic][${attemptId}] Stage 5: Cannot join room "${cleanCode}", room does not exist.`);
+    res.status(404).json({
+      error: `لم يتم العثور على رمز الغرفة المطلوب: ${cleanCode}`,
+      stage: 5,
+      attemptId
+    });
     return;
   }
 
   const trimmedName = (name || '').trim();
   if (!trimmedName) {
-    res.status(400).json({ error: 'الاسم مطلوب' });
+    console.warn(`[Diagnostic][${attemptId}] Stage 6: Join rejected, empty name provided.`);
+    res.status(400).json({
+      error: 'الاسم مطلوب للانضمام إلى الغرفة',
+      stage: 6,
+      attemptId
+    });
     return;
   }
 
-  if (!room.students[trimmedName]) {
-    room.students[trimmedName] = {
-      name: trimmedName,
-      score: 0,
-      currentIndex: 0,
-      correctCount: 0,
-      streak: 0,
-      answers: [],
-      lastActive: Date.now(),
-      completed: false
-    };
-  } else {
-    room.students[trimmedName].lastActive = Date.now();
+  try {
+    if (!room.students[trimmedName]) {
+      room.students[trimmedName] = {
+        name: trimmedName,
+        score: 0,
+        currentIndex: 0,
+        correctCount: 0,
+        streak: 0,
+        answers: [],
+        lastActive: Date.now(),
+        completed: false
+      };
+    } else {
+      room.students[trimmedName].lastActive = Date.now();
+    }
+
+    // If duel and 2 players joined, auto-start!
+    if (room.roomType === 'duel' && Object.keys(room.students).length === 2 && room.status === 'lobby') {
+      room.status = 'playing';
+      room.currentQuestionIndex = 0;
+      room.questionStartedAt = Date.now();
+    }
+
+    saveRooms();
+    console.log(`[Diagnostic][${attemptId}] Stage 6 Success: Player "${trimmedName}" joined room "${cleanCode}" successfully.`);
+
+    res.json({
+      success: true,
+      room: sanitizeRoomForClient(room, false),
+      attemptId
+    });
+  } catch (err: any) {
+    console.error(`[Diagnostic][${attemptId}] Stage 6 Failure: Error while joining room:`, err?.message || err);
+    res.status(500).json({
+      error: 'فشل الانضمام إلى الغرفة',
+      stage: 6,
+      attemptId
+    });
   }
-
-  // If duel and 2 players joined, auto-start!
-  if (room.roomType === 'duel' && Object.keys(room.students).length === 2 && room.status === 'lobby') {
-    room.status = 'playing';
-    room.currentQuestionIndex = 0;
-    room.questionStartedAt = Date.now();
-  }
-
-  saveRooms();
-
-  // Joining student is always sanitized as non-host
-  res.json({ success: true, room: sanitizeRoomForClient(room, false) });
 });
 
 // 4. Start room manually (Protected: Host or Admin required)

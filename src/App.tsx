@@ -62,6 +62,7 @@ import {
   setRoomHostToken, 
   getHostAuthHeaders 
 } from './utils/auth';
+import { generateAttemptId, formatDiagnosticMessage } from './utils/roomDiagnostics';
 
 // --- Types ---
 interface Question {
@@ -635,7 +636,7 @@ export default function App() {
 
   // Read URL params (e.g. ?room=ABCD, #room=ABCD, or #ABCD)
   useEffect(() => {
-    const handleUrlRoom = () => {
+    const handleUrlRoom = async () => {
       try {
         const params = new URLSearchParams(window.location.search);
         let roomParam = params.get('room');
@@ -652,15 +653,37 @@ export default function App() {
         }
         if (roomParam) {
           const cleanCode = roomParam.trim().toUpperCase();
+          const attemptId = generateAttemptId('OPEN');
+          console.log(`[Diagnostic][Client][${attemptId}] Opening room from URL/Hash with code: "${cleanCode}"`);
+
           setRoomId(cleanCode);
           setQuickRoomCode(cleanCode);
-          const hostToken = getRoomHostToken(cleanCode);
-          if (hostToken) {
-            setIsTeacher(true);
-            setView('lobby');
-          } else {
-            setIsTeacher(false);
-            setView('join');
+
+          try {
+            const hostToken = getRoomHostToken(cleanCode);
+            const headers = getHostAuthHeaders(cleanCode);
+            headers['x-attempt-id'] = attemptId;
+
+            const res = await fetch(`/api/rooms/${cleanCode}`, { headers });
+            if (res.ok) {
+              const data: Room = await res.json();
+              setRoom(data);
+              if (hostToken) {
+                setIsTeacher(true);
+                setView('lobby');
+              } else {
+                setIsTeacher(false);
+                setView('join');
+              }
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              const stage = errData.stage || (res.status === 404 ? 5 : 8);
+              console.warn(`[Diagnostic][Client][${attemptId}] Stage ${stage} Opening Failure:`, errData);
+              showToast(formatDiagnosticMessage(stage, attemptId, `رمز الغرفة (${cleanCode}) غير موجود أو تعذر فتحه`));
+            }
+          } catch (netErr) {
+            console.error(`[Diagnostic][Client][${attemptId}] Stage 1 Failure opening room:`, netErr);
+            showToast(formatDiagnosticMessage(1, attemptId));
           }
         }
       } catch {
@@ -772,59 +795,127 @@ export default function App() {
     }
   }, [timeLeft, view, hasAnsweredCurrent, room?.status]);
 
-  // Create room
+  // Create room with comprehensive safe diagnostic stages
   const handleCreateRoom = async (configData: any) => {
     sounds.playTap();
+    const attemptId = generateAttemptId('CREATE');
+    console.log(`[Diagnostic][Client][${attemptId}] Starting room creation attempt...`);
+
+    let createRes: Response;
     try {
-      const res = await fetch('/api/rooms', {
+      createRes = await fetch('/api/rooms', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(configData)
+        headers: {
+          'Content-Type': 'application/json',
+          'x-attempt-id': attemptId
+        },
+        body: JSON.stringify({ ...configData, attemptId })
       });
-      const data = await res.json();
-      if (res.ok && data.roomId && data.room) {
-        if (data.hostToken) {
-          setRoomHostToken(data.roomId, data.hostToken);
-        }
-        setRoomId(data.roomId);
-        setRoom(data.room);
-        setIsTeacher(true);
-        setView('lobby');
-      } else {
-        showToast(data?.error || 'حدث خطأ أثناء إنشاء الغرفة');
+    } catch (networkErr: any) {
+      // Stage 1: Connection failure
+      console.error(`[Diagnostic][Client][${attemptId}] Stage 1 Failure (Network/Fetch):`, networkErr);
+      showToast(formatDiagnosticMessage(1, attemptId));
+      return;
+    }
+
+    let data: any;
+    try {
+      data = await createRes.json();
+    } catch (parseErr) {
+      console.error(`[Diagnostic][Client][${attemptId}] Stage 8 Failure (Non-JSON server response):`, parseErr);
+      showToast(formatDiagnosticMessage(8, attemptId, 'استجابة غير صالحة من الخادم'));
+      return;
+    }
+
+    if (!createRes.ok || !data.roomId || !data.room) {
+      const stage = (data.stage && data.stage >= 1 && data.stage <= 8) 
+        ? data.stage 
+        : (createRes.status === 500 ? 2 : 8);
+      console.error(`[Diagnostic][Client][${attemptId}] Stage ${stage} Failure:`, data);
+      showToast(formatDiagnosticMessage(stage, data.attemptId || attemptId, data.error));
+      return;
+    }
+
+    // Created! Now execute Stage 4 Verification (verify room can be retrieved from server)
+    console.log(`[Diagnostic][Client][${attemptId}] Room created with code: ${data.roomId}. Verifying retrieval (Stage 4 check)...`);
+    try {
+      const verifyHeaders: Record<string, string> = {
+        'x-attempt-id': attemptId
+      };
+      if (data.hostToken) {
+        verifyHeaders['x-host-token'] = data.hostToken;
       }
-    } catch (err) {
-      console.error('Create room error:', err);
-      showToast('حدث خطأ أثناء إنشاء الغرفة، يرجى المحاولة ثانية');
+
+      const verifyRes = await fetch(`/api/rooms/${data.roomId}`, { headers: verifyHeaders });
+      if (!verifyRes.ok) {
+        console.error(`[Diagnostic][Client][${attemptId}] Stage 4 Failure: Created room ${data.roomId} could not be retrieved. Status: ${verifyRes.status}`);
+        showToast(formatDiagnosticMessage(4, attemptId, `تم إنشاء الغرفة (${data.roomId}) بنجاح ولكن تعذر استرجاع بياناتها من الخادم`));
+        return;
+      }
+
+      const verifiedRoom = await verifyRes.json();
+      console.log(`[Diagnostic][Client][${attemptId}] Stage 4 Verification Success: Room ${data.roomId} verified.`);
+
+      if (data.hostToken) {
+        setRoomHostToken(data.roomId, data.hostToken);
+      }
+      setRoomId(data.roomId);
+      setRoom(verifiedRoom);
+      setIsTeacher(true);
+      setView('lobby');
+    } catch (verifyErr) {
+      console.error(`[Diagnostic][Client][${attemptId}] Stage 4 Failure during verification fetch:`, verifyErr);
+      showToast(formatDiagnosticMessage(4, attemptId));
     }
   };
 
-  // Join room
+  // Join room with safe diagnostic stages
   const handleJoinRoom = async (code: string, name: string) => {
     sounds.playTap();
     const cleanCode = code.trim().toUpperCase();
     const cleanName = name.trim();
     if (!cleanCode || !cleanName) return;
 
+    const attemptId = generateAttemptId('JOIN');
+    console.log(`[Diagnostic][Client][${attemptId}] Attempting to join room "${cleanCode}" as "${cleanName}"...`);
+
+    let res: Response;
     try {
-      const res = await fetch(`/api/rooms/${cleanCode}/join`, {
+      res = await fetch(`/api/rooms/${cleanCode}/join`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: cleanName })
+        headers: {
+          'Content-Type': 'application/json',
+          'x-attempt-id': attemptId
+        },
+        body: JSON.stringify({ name: cleanName, attemptId })
       });
-      if (res.ok) {
-        const data = await res.json();
-        setRoomId(cleanCode);
-        setPlayerName(cleanName);
-        setRoom(data.room);
-        setIsTeacher(false);
-        setView(data.room.status === 'playing' || data.room.status === 'intermission' ? 'game' : 'lobby');
-      } else {
-        const err = await res.json();
-        showToast(err.error || 'رمز الغرفة غير صحيح');
-      }
+    } catch (netErr) {
+      console.error(`[Diagnostic][Client][${attemptId}] Stage 1 Failure (Network):`, netErr);
+      showToast(formatDiagnosticMessage(1, attemptId));
+      return;
+    }
+
+    let data: any;
+    try {
+      data = await res.json();
     } catch {
-      showToast('تعذر الاتصال بالغرفة');
+      showToast(formatDiagnosticMessage(8, attemptId, 'استجابة غير صالحة من الخادم'));
+      return;
+    }
+
+    if (res.ok && data.room) {
+      console.log(`[Diagnostic][Client][${attemptId}] Joined room "${cleanCode}" successfully.`);
+      setRoomId(cleanCode);
+      setPlayerName(cleanName);
+      setRoom(data.room);
+      setIsTeacher(false);
+      setView(data.room.status === 'playing' || data.room.status === 'intermission' ? 'game' : 'lobby');
+    } else {
+      const stage = (data.stage && data.stage >= 1 && data.stage <= 8) 
+        ? data.stage 
+        : (res.status === 404 ? 5 : 6);
+      console.warn(`[Diagnostic][Client][${attemptId}] Stage ${stage} Join Failure:`, data);
+      showToast(formatDiagnosticMessage(stage, data.attemptId || attemptId, data.error));
     }
   };
 

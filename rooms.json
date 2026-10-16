@@ -3,7 +3,7 @@
     "id": "4ZF6",
     "title": "تحدي جدول الضرب",
     "roomType": "duel",
-    "status": "intermission",
+    "status": "finished",
     "config": {
       "tables": [
         7
@@ -56,9 +56,9 @@
         "text": "7 × 11"
       }
     ],
-    "currentQuestionIndex": 1,
-    "questionStartedAt": 1792052452783,
-    "intermissionEndsAt": 1792053676000,
+    "currentQuestionIndex": 2,
+    "questionStartedAt": 1792151061157,
+    "intermissionEndsAt": 1792151076177,
     "students": {
       "عمر التميمي": {
         "name": "عمر التميمي",
@@ -89,7 +89,8 @@
         "completed": false
       }
     },
-    "createdAt": 1791965845609
+    "createdAt": 1791965845609,
+    "resultsRecorded": true
   },
   "U4PC": {
     "id": "U4PC",
@@ -369,5 +370,81 @@
     "createdAt": 1792053808416,
     "hostToken": "a5b66364e88e87d91844e41f97e15b68bdef6aadcac479e7",
     "resultsRecorded": true
+  },
+  "4U9D": {
+    "id": "4U9D",
+    "title": "تحدي جدول الضرب",
+    "roomType": "duel",
+    "status": "lobby",
+    "config": {
+      "tables": [
+        7
+      ],
+      "questionsCount": 3,
+      "timePerQuestion": 10,
+      "mode": "multi"
+    },
+    "questions": [
+      {
+        "id": 1,
+        "a": 7,
+        "b": 3,
+        "operation": "×",
+        "answer": 21,
+        "options": [
+          19,
+          31,
+          28,
+          21
+        ],
+        "text": "7 × 3"
+      },
+      {
+        "id": 2,
+        "a": 7,
+        "b": 7,
+        "operation": "×",
+        "answer": 49,
+        "options": [
+          50,
+          47,
+          49,
+          56
+        ],
+        "text": "7 × 7"
+      },
+      {
+        "id": 3,
+        "a": 7,
+        "b": 2,
+        "operation": "×",
+        "answer": 14,
+        "options": [
+          15,
+          4,
+          12,
+          14
+        ],
+        "text": "7 × 2"
+      }
+    ],
+    "currentQuestionIndex": 0,
+    "questionStartedAt": 0,
+    "intermissionEndsAt": 0,
+    "students": {
+      "أحمد": {
+        "name": "أحمد",
+        "score": 0,
+        "currentIndex": 0,
+        "correctCount": 0,
+        "streak": 0,
+        "answers": [],
+        "lastActive": 1792151316947,
+        "completed": false
+      }
+    },
+    "createdAt": 1792151306216,
+    "hostToken": "4051d1dd0a3e80c1431b0839b13b2d39e2c15aae98acd1ac",
+    "resultsRecorded": false
   }
 }
