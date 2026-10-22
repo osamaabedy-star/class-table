@@ -12,6 +12,7 @@ export interface StudentResultRow {
   correctAnswers: number;
   totalAnswered: number;
   percentage?: number;
+  timeSpent?: number;
   date?: string;
   status?: string;
 }
@@ -28,6 +29,7 @@ export function exportResultsToExcel(rows: StudentResultRow[], filename: string 
     'الإجابات الصحيحة',
     'إجمالي الأسئلة',
     'النسبة المئوية',
+    'زمن الإجابات (ثانية)',
     'الحالة',
     'تاريخ المشاركة'
   ];
@@ -39,6 +41,7 @@ export function exportResultsToExcel(rows: StudentResultRow[], filename: string 
     const pct = r.percentage ?? (r.totalAnswered > 0 ? Math.round((r.correctAnswers / r.totalAnswered) * 100) : 0);
     const date = r.date || new Date().toLocaleDateString('ar-SA');
     const status = r.status || (pct >= 80 ? 'متقن ومتميز' : pct >= 50 ? 'جيد' : 'يحتاج تدريب');
+    const timeFormatted = r.timeSpent !== undefined ? `${r.timeSpent.toFixed(1)}` : '—';
 
     const escapedName = `"${(r.name || '').replace(/"/g, '""')}"`;
     const escapedGrade = `"${(r.gradeName || 'الصف المحدد').replace(/"/g, '""')}"`;
@@ -53,6 +56,7 @@ export function exportResultsToExcel(rows: StudentResultRow[], filename: string 
       r.correctAnswers,
       r.totalAnswered,
       `"${pct}%"`,
+      `"${timeFormatted}"`,
       `"${status}"`,
       `"${date}"`
     ].join(','));

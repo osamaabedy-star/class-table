@@ -156,17 +156,27 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
     setRevealAnswer(false);
   }, [room.currentQuestionIndex]);
 
-  // All students sorted by score descending
+  // All students sorted by score descending, with total time spent as tiebreaker
   const sortedStudents = useMemo(() => {
     return Object.values(room.students || {}).sort((a, b) => {
+      // 1. Primary: Score descending
       if (b.score !== a.score) return b.score - a.score;
-      return b.correctCount - a.correctCount;
+      // 2. Tiebreaker: Fastest time (الأولوية في الفوز في حال التعادل لمن جاوب أسرع من حيث الوقت)
+      const aTime = (a.answers || []).reduce((acc, ans) => acc + (ans.timeSpent || 0), 0);
+      const bTime = (b.answers || []).reduce((acc, ans) => acc + (ans.timeSpent || 0), 0);
+      if (Math.abs(aTime - bTime) > 0.05) return aTime - bTime;
+      // 3. Fallback: correctCount then streak
+      if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+      return (b.streak || 0) - (a.streak || 0);
     });
   }, [room.students]);
 
   // Two primary students (for head-to-head match)
   const student1 = sortedStudents[0] || null;
   const student2 = sortedStudents[1] || null;
+  const s1Time = useMemo(() => (student1?.answers || []).reduce((acc, a) => acc + (a.timeSpent || 0), 0), [student1?.answers]);
+  const s2Time = useMemo(() => (student2?.answers || []).reduce((acc, a) => acc + (a.timeSpent || 0), 0), [student2?.answers]);
+  const isDuelTied = Boolean(student1 && student2 && student1.score === student2.score && student1.score > 0);
 
   // Statistics for current question
   const currentQStats = useMemo(() => {
@@ -533,9 +543,14 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
                     </div>
                     <div>
                       <span className="font-black text-base text-white block">{student1.name}</span>
-                      <span className="text-[10px] text-slate-400 font-bold">
-                        صحيح: {toHindi(student1.correctCount)} | خطأ: {toHindi(student1.answers.filter(a => !a.isCorrect).length)}
+                      <span className="text-[10px] text-slate-400 font-bold block">
+                        صحيح: {toHindi(student1.correctCount)} | الوقت: {toHindi(s1Time.toFixed(1))}ث
                       </span>
+                      {isDuelTied && Math.abs(s1Time - s2Time) > 0.05 && s1Time < s2Time && (
+                        <span className="text-[9px] font-black bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded mt-0.5 inline-block">
+                          ⚡ متقدم بالأسبقية والسرعة
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -600,9 +615,14 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
                     </div>
                     <div>
                       <span className="font-black text-base text-white block">{student2.name}</span>
-                      <span className="text-[10px] text-slate-400 font-bold">
-                        صحيح: {toHindi(student2.correctCount)} | خطأ: {toHindi(student2.answers.filter(a => !a.isCorrect).length)}
+                      <span className="text-[10px] text-slate-400 font-bold block">
+                        صحيح: {toHindi(student2.correctCount)} | الوقت: {toHindi(s2Time.toFixed(1))}ث
                       </span>
+                      {isDuelTied && Math.abs(s1Time - s2Time) > 0.05 && s2Time < s1Time && (
+                        <span className="text-[9px] font-black bg-indigo-400 text-slate-950 px-1.5 py-0.2 rounded mt-0.5 inline-block">
+                          ⚡ متقدم بالأسبقية والسرعة
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -823,12 +843,14 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
                     ))}
                     <th className="py-2 px-2 text-center text-emerald-400">صحيح</th>
                     <th className="py-2 px-2 text-center text-red-400">خطأ</th>
+                    <th className="py-2 px-2 text-center text-cyan-400">الوقت ⏱</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-mono">
                   {sortedStudents.map(s => {
                     const wrongCount = s.answers.filter(a => !a.isCorrect).length;
                     const pct = totalQ > 0 ? Math.round((s.score / totalQ) * 100) : 0;
+                    const sTotalTime = s.answers.reduce((acc, a) => acc + (a.timeSpent || 0), 0);
                     return (
                       <tr
                         key={s.name}
@@ -867,6 +889,9 @@ export const TeacherLiveGameDashboard: React.FC<TeacherLiveGameDashboardProps> =
                         </td>
                         <td className="py-2 px-2 text-center text-red-400 font-black">
                           {toHindi(wrongCount)}
+                        </td>
+                        <td className="py-2 px-2 text-center text-cyan-300 font-bold">
+                          {toHindi(sTotalTime.toFixed(1))}ث
                         </td>
                       </tr>
                     );

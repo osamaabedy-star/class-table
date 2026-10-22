@@ -67,6 +67,7 @@ interface StudentParticipant {
   correctAnswers: number;
   totalAnswered: number;
   eliminated?: boolean;
+  totalTimeSpent?: number;
 }
 
 interface ClassroomDirectGameProps {
@@ -169,13 +170,19 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
     });
   }, [studentsList, selectedGradeId, selectedSection, searchQuery]);
 
-  // Ranked participants list (re-sorted automatically after every question with percentage)
+  // Ranked participants list (re-sorted automatically after every question with percentage & time tiebreaker)
   const rankedActiveStudents = useMemo(() => {
     return [...activeStudents].map(s => {
       const pct = s.totalAnswered > 0 ? Math.round((s.correctAnswers / s.totalAnswered) * 100) : 0;
       return { ...s, percentage: pct };
     }).sort((a, b) => {
+      // 1. Primary: Score descending
       if (b.score !== a.score) return b.score - a.score;
+      // 2. Tiebreaker: Fastest time (الأولوية في الفوز في حال التعادل لمن جاوب أسرع من حيث الوقت)
+      const aTime = a.totalTimeSpent ?? 9999;
+      const bTime = b.totalTimeSpent ?? 9999;
+      if (Math.abs(aTime - bTime) > 0.05) return aTime - bTime;
+      // 3. Fallback: Percentage & correct answers
       if (b.percentage !== a.percentage) return b.percentage - a.percentage;
       return b.correctAnswers - a.correctAnswers;
     });
@@ -395,6 +402,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
         score: 0,
         correctAnswers: 0,
         totalAnswered: 0,
+        totalTimeSpent: 0,
         eliminated: false
       }));
 
@@ -434,6 +442,9 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
     setLastCorrect(isCorrect);
     sounds.playPraiseVoice(isCorrect);
 
+    // Calculate exact time taken for this answer
+    const timeSpent = Math.max(0.1, Number((timeLimit - Math.max(0, timeLeft)).toFixed(1)));
+
     if (isCorrect) {
       sounds.playCorrect();
       confetti({ particleCount: 35, spread: 50, origin: { y: 0.6 } });
@@ -441,7 +452,13 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       setActiveStudents(prev =>
         prev.map((s, idx) =>
           idx === currentStudentIndex
-            ? { ...s, score: s.score + pts, correctAnswers: s.correctAnswers + 1, totalAnswered: s.totalAnswered + 1 }
+            ? { 
+                ...s, 
+                score: s.score + pts, 
+                correctAnswers: s.correctAnswers + 1, 
+                totalAnswered: s.totalAnswered + 1,
+                totalTimeSpent: Number(((s.totalTimeSpent || 0) + timeSpent).toFixed(1))
+              }
             : s
         )
       );
@@ -453,6 +470,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
             ? { 
                 ...s, 
                 totalAnswered: s.totalAnswered + 1,
+                totalTimeSpent: Number(((s.totalTimeSpent || 0) + timeSpent).toFixed(1)),
                 eliminated: competitionType === 'sudden_death' ? true : s.eliminated 
               }
             : s
@@ -541,7 +559,8 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
           totalAnswered: s.totalAnswered,
           percentage: s.percentage,
           rank: idx + 1,
-          eliminated: s.eliminated
+          eliminated: s.eliminated,
+          timeSpent: Number((s.totalTimeSpent || 0).toFixed(1))
         }))
       });
     } catch (e) {
@@ -629,6 +648,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       correctAnswers: s.correctAnswers,
       totalAnswered: s.totalAnswered,
       percentage: s.percentage,
+      timeSpent: Number((s.totalTimeSpent || 0).toFixed(1)),
       status: s.eliminated ? 'مستبعد' : s.percentage >= 80 ? 'بطل متقن' : 'مشارك',
       date: new Date().toLocaleDateString('ar-SA')
     }));
@@ -1175,7 +1195,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                               )}
                             </div>
                             <span className="text-[9px] text-slate-400 block font-mono">
-                              {toHindi(s.correctAnswers)} / {toHindi(s.totalAnswered)} صحيحة
+                              {toHindi(s.correctAnswers)} / {toHindi(s.totalAnswered)} صحيحة • ⏱ {toHindi((s.totalTimeSpent || 0).toFixed(1))}ث
                             </span>
                           </div>
                         </div>
@@ -1381,11 +1401,17 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                       <div className="text-right">
                         <span className="text-[11px] font-black text-amber-400 block uppercase">بطل المسابقة والمركز الأول:</span>
                         <span className="text-lg font-black text-white font-['El_Messiri',serif]">{winner.name}</span>
+                        {rankedActiveStudents.length > 1 && rankedActiveStudents[0].score === rankedActiveStudents[1].score && rankedActiveStudents[0].score > 0 && (
+                          <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-black bg-cyan-400 text-slate-950 px-2 py-0.5 rounded-md shadow-sm block w-fit">
+                            ⚡ حسم الفوز بأسبقية السرعة ({toHindi((winner.totalTimeSpent || 0).toFixed(1))}ث مقابل {toHindi((rankedActiveStudents[1]?.totalTimeSpent || 0).toFixed(1))}ث)
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="text-left font-mono">
                       <span className="text-xl font-black text-amber-400 block">{toHindi(winner.score)} درجات</span>
-                      <span className="text-xs font-black text-emerald-400">نسبة الإتقان: {toHindi(winner.percentage)}٪</span>
+                      <span className="text-xs font-black text-emerald-400 block">نسبة الإتقان: {toHindi(winner.percentage)}٪</span>
+                      <span className="text-[10px] text-slate-300 font-bold block">إجمالي الوقت: {toHindi((winner.totalTimeSpent || 0).toFixed(1))}ث</span>
                     </div>
                   </div>
 
@@ -1414,7 +1440,7 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                       <div className="text-right">
                         <span className="font-bold text-xs block text-white">{s.name}</span>
                         <span className="text-[10px] text-slate-400">
-                          {toHindi(s.correctAnswers)} صحيحة من {toHindi(s.totalAnswered)}
+                          {toHindi(s.correctAnswers)} صحيحة من {toHindi(s.totalAnswered)} • ⏱ {toHindi((s.totalTimeSpent || 0).toFixed(1))}ث
                         </span>
                       </div>
                     </div>

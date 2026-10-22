@@ -1474,7 +1474,10 @@ export default function App() {
             </div>
             <div>
               <span className="font-black text-sm block leading-tight truncate max-w-[110px]">{playerName}</span>
-              <span className="text-xs font-mono font-black text-amber-400">{toHindi(currentStudent?.score || 0)} نقطة</span>
+              <div className="flex items-center gap-1 font-mono">
+                <span className="text-xs font-black text-amber-400">{toHindi(currentStudent?.score || 0)} نقطة</span>
+                <span className="text-[10px] text-slate-400">({toHindi(((currentStudent?.answers || []).reduce((acc, a) => acc + (a.timeSpent || 0), 0)).toFixed(1))}ث)</span>
+              </div>
             </div>
           </div>
 
@@ -1492,7 +1495,10 @@ export default function App() {
               </div>
               <div>
                 <span className="font-black text-sm block leading-tight truncate max-w-[110px]">{opponentStudent.name}</span>
-                <span className="text-xs font-mono font-black text-indigo-300">{toHindi(opponentStudent.score)} نقطة</span>
+                <div className="flex items-center gap-1 font-mono">
+                  <span className="text-xs font-black text-indigo-300">{toHindi(opponentStudent.score)} نقطة</span>
+                  <span className="text-[10px] text-slate-400">({toHindi(((opponentStudent.answers || []).reduce((acc, a) => acc + (a.timeSpent || 0), 0)).toFixed(1))}ث)</span>
+                </div>
               </div>
             </div>
           ) : (
@@ -1593,7 +1599,19 @@ export default function App() {
   // VIEW: LEADERBOARD & RESULTS
   // -------------------------------------------------------------
   const renderLeaderboard = () => {
-    const studentList = Object.values(room?.students || {}).sort((a, b) => b.score - a.score);
+    const studentList = Object.values(room?.students || {}).sort((a, b) => {
+      // 1. Highest score
+      if (b.score !== a.score) return b.score - a.score;
+      // 2. Faster total time (الأولوية في الفوز في حال التعادل لمن جاوب أسرع من حيث الوقت)
+      const aTime = (a.answers || []).reduce((acc, ans) => acc + (ans.timeSpent || 0), 0);
+      const bTime = (b.answers || []).reduce((acc, ans) => acc + (ans.timeSpent || 0), 0);
+      if (Math.abs(aTime - bTime) > 0.05) return aTime - bTime;
+      // 3. Fallback: correct count then streak
+      if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+      return (b.streak || 0) - (a.streak || 0);
+    });
+
+    const isFirstPlaceTied = studentList.length > 1 && studentList[0].score === studentList[1].score && studentList[0].score > 0;
 
     return (
       <div className="min-h-screen bg-slate-950 text-white font-sans p-3 sm:p-6 flex flex-col justify-between">
@@ -1602,7 +1620,7 @@ export default function App() {
             <Trophy className="w-6 h-6 text-amber-400" />
             <div>
               <h2 className="text-lg font-black">النتائج النهائية للمسابقة</h2>
-              <span className="text-[10px] text-slate-400 font-bold">تم احتساب النتائج تلقائياً</span>
+              <span className="text-[10px] text-slate-400 font-bold">تم احتساب النتائج تلقائياً مع أولوية السرعة عند التعادل</span>
             </div>
           </div>
 
@@ -1623,6 +1641,7 @@ export default function App() {
               const totalQ = room?.config.questionsCount || 10;
               const pct = totalQ > 0 ? Math.round((s.score / totalQ) * 100) : 0;
               const isWinner = idx === 0;
+              const totalTime = (s.answers || []).reduce((acc, a) => acc + (a.timeSpent || 0), 0);
 
               return (
                 <div
@@ -1638,16 +1657,21 @@ export default function App() {
                       {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : toHindi(idx + 1)}
                     </span>
                     <div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-black text-sm text-white">{s.name}</span>
                         {isWinner && (
                           <span className="text-[10px] font-black bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded-md">
                             بطل المسابقة 👑
                           </span>
                         )}
+                        {isWinner && isFirstPlaceTied && (
+                          <span className="text-[10px] font-black bg-cyan-400 text-slate-950 px-1.5 py-0.2 rounded-md">
+                            ⚡ حسم الفوز بأسبقية السرعة ({toHindi(totalTime.toFixed(1))}ث)
+                          </span>
+                        )}
                       </div>
                       <span className="text-[10px] text-slate-400 font-bold block font-mono">
-                        {toHindi(s.correctCount)} صحيحة من {toHindi(totalQ)}
+                        {toHindi(s.correctCount)} صحيحة من {toHindi(totalQ)} • ⏱ {toHindi(totalTime.toFixed(1))}ث
                       </span>
                     </div>
                   </div>

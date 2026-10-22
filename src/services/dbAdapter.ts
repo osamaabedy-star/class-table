@@ -48,6 +48,7 @@ export interface TestParticipant {
   percentage: number;
   rank: number;
   eliminated?: boolean;
+  timeSpent?: number;
 }
 
 export interface TestSessionRecord {
