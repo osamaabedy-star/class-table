@@ -75,9 +75,27 @@ class SoundEffectsManager {
     this.playCorrect();
   }
 
-  // Play wrong buzzer (silent as requested, error uses visual red flash only)
+  // Play wrong buzzer (audible two-tone low frequency buzzer)
   playWrong() {
-    // Silent on error - visual red flash only
+    const ctx = this.getContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(150, ctx.currentTime);
+      osc.frequency.setValueAtTime(110, ctx.currentTime + 0.12);
+
+      gain.gain.setValueAtTime(0.22, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.32);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.33);
+    } catch {
+      // ignore
+    }
   }
 
   // Play wheel spin tick sound

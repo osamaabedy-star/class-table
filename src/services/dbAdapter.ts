@@ -183,11 +183,112 @@ let memoryRecordedGames: Set<string> = new Set(
 // PostgreSQL / Supabase Connection Pool
 // ==============================================================================
 
+const DB_CONFIG_FILE = process.env.VERCEL ? '/tmp/riyadh_db_config.txt' : join(rootDir, '.db_config.txt');
+let runtimeCustomUrl: string | null = null;
+
+function loadPersistedCustomUrl(): string | null {
+  try {
+    if (fs.existsSync(DB_CONFIG_FILE)) {
+      const val = fs.readFileSync(DB_CONFIG_FILE, 'utf-8').trim();
+      if (val.length > 5) return val;
+    }
+  } catch {}
+  return null;
+}
+
+export function setCustomDatabaseUrl(url: string | null): void {
+  runtimeCustomUrl = url && url.trim().length > 5 ? url.trim() : null;
+  try {
+    if (runtimeCustomUrl) {
+      fs.writeFileSync(DB_CONFIG_FILE, runtimeCustomUrl, 'utf-8');
+    } else if (fs.existsSync(DB_CONFIG_FILE)) {
+      fs.unlinkSync(DB_CONFIG_FILE);
+    }
+  } catch {}
+
+  // Reset active pool to pick up new connection
+  if (pgPool) {
+    try {
+      pgPool.end();
+    } catch {}
+    pgPool = null;
+  }
+  isPostgresInitialized = false;
+  initPromise = null;
+}
+
+export function maskConnectionString(url: string | null): string {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '••••••••';
+    }
+    return parsed.toString();
+  } catch {
+    return 'postgres://••••••••';
+  }
+}
+
+export async function testDatabaseConnection(testUrl: string): Promise<{
+  success: boolean;
+  message: string;
+  error?: string;
+  latencyMs?: number;
+  databaseName?: string;
+}> {
+  const start = Date.now();
+  const trimmed = testUrl.trim();
+  const isLocal = trimmed.includes('localhost') || trimmed.includes('127.0.0.1');
+
+  const tempPool = new Pool({
+    connectionString: trimmed,
+    ssl: isLocal ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 8000,
+  });
+
+  try {
+    const client = await tempPool.connect();
+    try {
+      const res = await client.query('SELECT NOW() as current_time, current_database() as db_name');
+      const latencyMs = Date.now() - start;
+      const dbName = res.rows[0]?.db_name || 'postgres';
+      return {
+        success: true,
+        message: `تم الاتصال بنجاح بقاعدة البيانات السحابية (${dbName}) في زمن استجابة ${latencyMs} مللي ثانية`,
+        latencyMs,
+        databaseName: dbName
+      };
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      message: 'تعذر الاتصال بقاعدة البيانات. يرجى التأكد من صحة الرابط وكلمة المرور وصلاحية الاتصال الخارجي.',
+      error: err?.message || String(err)
+    };
+  } finally {
+    try {
+      await tempPool.end();
+    } catch {}
+  }
+}
+
 let pgPool: pg.Pool | null = null;
 let isPostgresInitialized = false;
 let initPromise: Promise<boolean> | null = null;
 
 function getPostgresConnectionString(): string | null {
+  if (runtimeCustomUrl && runtimeCustomUrl.length > 5) {
+    return runtimeCustomUrl;
+  }
+  const persisted = loadPersistedCustomUrl();
+  if (persisted) {
+    runtimeCustomUrl = persisted;
+    return persisted;
+  }
+
   const url = process.env.DATABASE_URL || 
               process.env.POSTGRES_URL || 
               process.env.SUPABASE_DB_URL || 
@@ -230,7 +331,7 @@ function getPool(): pg.Pool | null {
       ssl: isLocal ? false : { rejectUnauthorized: false },
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 7000,
     });
 
     pgPool.on('error', (err) => {
@@ -355,9 +456,12 @@ async function ensurePostgresSchema(): Promise<boolean> {
             percentage NUMERIC(5,2) NOT NULL DEFAULT 0,
             rank INT NOT NULL DEFAULT 0,
             eliminated BOOLEAN DEFAULT FALSE,
+            time_spent NUMERIC(8,2) DEFAULT 0,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             CONSTRAINT uq_session_participant UNIQUE (session_id, name)
           );
+
+          ALTER TABLE test_session_participants ADD COLUMN IF NOT EXISTS time_spent NUMERIC(8,2) DEFAULT 0;
 
           INSERT INTO grades (id, name, short_name, display_order) VALUES
             ('grade3', 'الصف الثالث الابتدائي', 'الثالث', 3),
@@ -463,7 +567,7 @@ async function ensurePostgresSchema(): Promise<boolean> {
 
 export const dbAdapter = {
   /**
-   * Status and metadata check for storage engine
+    * Status and metadata check for storage engine
    */
   async getStorageStatus(): Promise<{
     type: 'postgresql' | 'json-memory';
@@ -473,8 +577,14 @@ export const dbAdapter = {
     testsCount: number;
     roomsCount: number;
     connectionHost?: string;
+    maskedUrl?: string;
+    isCustom?: boolean;
   }> {
-    const configured = isDatabaseConfigured();
+    const connStr = getPostgresConnectionString();
+    const configured = Boolean(connStr);
+    const maskedUrl = maskConnectionString(connStr);
+    const isCustom = Boolean(runtimeCustomUrl || loadPersistedCustomUrl());
+
     if (configured) {
       const ok = await ensurePostgresSchema();
       if (ok && pgPool) {
@@ -489,7 +599,9 @@ export const dbAdapter = {
             studentsCount: parseInt(sRes.rows[0]?.count || '0', 10),
             testsCount: parseInt(tRes.rows[0]?.count || '0', 10),
             roomsCount: parseInt(rRes.rows[0]?.count || '0', 10),
-            connectionHost: 'Supabase / PostgreSQL Managed Instance'
+            connectionHost: 'Supabase / PostgreSQL Cloud Database',
+            maskedUrl,
+            isCustom
           };
         } catch {
           // ignore error and report fallback
@@ -503,7 +615,10 @@ export const dbAdapter = {
       configured,
       studentsCount: memoryStudents.length,
       testsCount: memoryTests.length,
-      roomsCount: Object.keys(memoryRooms).length
+      roomsCount: Object.keys(memoryRooms).length,
+      connectionHost: 'ذاكرة الخادم المؤقتة (Local Memory Fallback)',
+      maskedUrl,
+      isCustom
     };
   },
 
@@ -864,7 +979,7 @@ export const dbAdapter = {
           SELECT 
             session_id, student_id AS "id", name, score, 
             correct_answers AS "correctAnswers", total_answered AS "totalAnswered",
-            percentage, rank, eliminated
+            percentage, rank, eliminated, time_spent AS "timeSpent"
           FROM test_session_participants
           ORDER BY session_id ASC, rank ASC;
         `);
@@ -880,7 +995,8 @@ export const dbAdapter = {
             totalAnswered: p.totalAnswered,
             percentage: Number(p.percentage),
             rank: p.rank,
-            eliminated: Boolean(p.eliminated)
+            eliminated: Boolean(p.eliminated),
+            timeSpent: p.timeSpent !== null && p.timeSpent !== undefined ? Number(p.timeSpent) : 0
           });
         }
 
@@ -943,18 +1059,20 @@ export const dbAdapter = {
             await client.query(`
               INSERT INTO test_session_participants (
                 session_id, student_id, name, score, correct_answers,
-                total_answered, percentage, rank, eliminated
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                total_answered, percentage, rank, eliminated, time_spent
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
               ON CONFLICT (session_id, name) DO UPDATE SET
                 score = EXCLUDED.score,
                 correct_answers = EXCLUDED.correct_answers,
                 total_answered = EXCLUDED.total_answered,
                 percentage = EXCLUDED.percentage,
                 rank = EXCLUDED.rank,
-                eliminated = EXCLUDED.eliminated;
+                eliminated = EXCLUDED.eliminated,
+                time_spent = EXCLUDED.time_spent;
             `, [
               test.id, p.id || null, p.name, p.score, p.correctAnswers,
-              p.totalAnswered, p.percentage, p.rank, Boolean(p.eliminated)
+              p.totalAnswered, p.percentage, p.rank, Boolean(p.eliminated),
+              Number(p.timeSpent) || 0
             ]);
           }
         }
@@ -1136,6 +1254,117 @@ export const dbAdapter = {
         // ignore
       }
     }
+  },
+
+  // ----------------------------------------------------------------------------
+  // Comprehensive School Analytics & Statistics
+  // ----------------------------------------------------------------------------
+
+  async getAnalytics(): Promise<{
+    totalStudents: number;
+    totalParticipations: number;
+    overallAccuracy: number;
+    totalScoreAll: number;
+    gradeStats: any[];
+    sectionStats: any[];
+    honorRolls: {
+      topOverall: SchoolStudent[];
+      masteryStars: SchoolStudent[];
+      mostActive: SchoolStudent[];
+    };
+  }> {
+    const students = await this.getStudents();
+    
+    const totalStudents = students.length;
+    const totalParticipations = students.reduce((acc, s) => acc + (s.participationCount || 0), 0);
+    const totalScoreAll = students.reduce((acc, s) => acc + (s.totalScore || 0), 0);
+    const totalCorrectAll = students.reduce((acc, s) => acc + (s.correctCount || 0), 0);
+    const totalAnsweredAll = students.reduce((acc, s) => acc + (s.totalAnswered || 0), 0);
+
+    const overallAccuracy = totalAnsweredAll > 0 
+      ? Math.round((totalCorrectAll / totalAnsweredAll) * 100) 
+      : 0;
+
+    const gradeKeys = [
+      { id: 'grade3', name: 'الصف الثالث الابتدائي' },
+      { id: 'grade4', name: 'الصف الرابع الابتدائي' },
+      { id: 'grade5', name: 'الصف الخامس الابتدائي' },
+      { id: 'grade6', name: 'الصف السادس الابتدائي' }
+    ];
+
+    const gradeStats = gradeKeys.map(g => {
+      const gradeStudents = students.filter(s => s.gradeId === g.id);
+      const count = gradeStudents.length;
+      const participations = gradeStudents.reduce((acc, s) => acc + (s.participationCount || 0), 0);
+      const totalScore = gradeStudents.reduce((acc, s) => acc + (s.totalScore || 0), 0);
+      const correct = gradeStudents.reduce((acc, s) => acc + (s.correctCount || 0), 0);
+      const answered = gradeStudents.reduce((acc, s) => acc + (s.totalAnswered || 0), 0);
+      const accuracy = answered > 0 ? Math.round((correct / answered) * 100) : 0;
+      const avgScore = count > 0 ? Math.round(totalScore / count) : 0;
+
+      const topStudent = [...gradeStudents].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))[0] || null;
+
+      return {
+        gradeId: g.id,
+        gradeName: g.name,
+        studentCount: count,
+        participations,
+        avgScore,
+        accuracy,
+        topStudent: topStudent ? { name: topStudent.name, score: topStudent.totalScore, section: topStudent.section } : null
+      };
+    });
+
+    const sectionMap: Record<string, { count: number; participations: number; totalScore: number }> = {};
+    for (const s of students) {
+      const key = `${s.gradeName} - شعبة ${s.section}`;
+      if (!sectionMap[key]) {
+        sectionMap[key] = { count: 0, participations: 0, totalScore: 0 };
+      }
+      sectionMap[key].count += 1;
+      sectionMap[key].participations += (s.participationCount || 0);
+      sectionMap[key].totalScore += (s.totalScore || 0);
+    }
+
+    const sectionStats = Object.entries(sectionMap).map(([title, val]) => ({
+      title,
+      studentCount: val.count,
+      participations: val.participations,
+      avgScore: val.count > 0 ? Math.round(val.totalScore / val.count) : 0
+    }));
+
+    const topOverall = [...students]
+      .filter(s => (s.participationCount || 0) > 0)
+      .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))
+      .slice(0, 10);
+
+    const masteryStars = [...students]
+      .filter(s => (s.totalAnswered || 0) >= 3 && (s.correctCount / s.totalAnswered) >= 0.8)
+      .sort((a, b) => {
+        const accA = a.correctCount / a.totalAnswered;
+        const accB = b.correctCount / b.totalAnswered;
+        return accB - accA;
+      })
+      .slice(0, 8);
+
+    const mostActive = [...students]
+      .filter(s => (s.participationCount || 0) > 0)
+      .sort((a, b) => (b.participationCount || 0) - (a.participationCount || 0))
+      .slice(0, 8);
+
+    return {
+      totalStudents,
+      totalParticipations,
+      overallAccuracy,
+      totalScoreAll,
+      gradeStats,
+      sectionStats,
+      honorRolls: {
+        topOverall,
+        masteryStars,
+        mostActive
+      }
+    };
   },
 
   // ----------------------------------------------------------------------------

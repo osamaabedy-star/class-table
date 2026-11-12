@@ -37,7 +37,14 @@ import {
   EyeOff,
   Download,
   FileSpreadsheet,
-  Database
+  Database,
+  Cloud,
+  Server,
+  AlertCircle,
+  ExternalLink,
+  Zap,
+  Check,
+  Copy
 } from 'lucide-react';
 import { RiyadhEbdaaLogo } from './RiyadhEbdaaLogo';
 import { toHindi } from '../utils/format';
@@ -77,7 +84,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [loginError, setLoginError] = useState<string>('');
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'roster' | 'upload' | 'analytics' | 'honor' | 'liveRooms'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'upload' | 'analytics' | 'honor' | 'liveRooms' | 'database'>('roster');
+
+  // Database Management State
+  const [dbStatus, setDbStatus] = useState<{
+    type: 'postgresql' | 'json-memory';
+    connected: boolean;
+    configured: boolean;
+    studentsCount: number;
+    testsCount: number;
+    roomsCount: number;
+    connectionHost?: string;
+    maskedUrl?: string;
+    isCustom?: boolean;
+    latencyMs?: number;
+  } | null>(null);
+  const [dbConfigUrl, setDbConfigUrl] = useState<string>('');
+  const [isTestingDb, setIsTestingDb] = useState<boolean>(false);
+  const [isSavingDb, setIsSavingDb] = useState<boolean>(false);
+  const [dbTestResult, setDbTestResult] = useState<{ success: boolean; message: string; latencyMs?: number } | null>(null);
+  const [isRestoringBackup, setIsRestoringBackup] = useState<boolean>(false);
 
   // Students Data
   const [students, setStudents] = useState<SchoolStudent[]>([]);
@@ -143,12 +169,170 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         const roomsData = await roomsRes.json();
         setLiveRooms(roomsData.rooms || []);
       }
+
+      // Fetch database status
+      const dbRes = await fetch('/api/school/db-test');
+      if (dbRes.ok) {
+        const dbData = await dbRes.json();
+        setDbStatus(dbData);
+      }
     } catch {
       // ignore
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  // Test database connection without activating
+  const handleTestDatabase = async (urlToTest?: string) => {
+    const url = (urlToTest || dbConfigUrl).trim();
+    if (!url) {
+      showToast('يرجى إدخال رابط الاتصال بقاعدة البيانات');
+      return;
+    }
+    setIsTestingDb(true);
+    setDbTestResult(null);
+    try {
+      const res = await fetch('/api/admin/database-config', {
+        method: 'POST',
+        headers: getAdminAuthHeaders(),
+        body: JSON.stringify({ connectionUrl: url, action: 'test-only' })
+      });
+      const data = await res.json();
+      setDbTestResult({
+        success: Boolean(data.success),
+        message: data.message || (data.success ? 'تم الاتصال بنجاح' : (data.error || 'فشل الاتصال بقاعدة البيانات')),
+        latencyMs: data.latencyMs
+      });
+      if (data.success) {
+        sounds.playSuccess();
+        showToast('تم التحقق من الاتصال بنجاح!');
+      } else {
+        sounds.playWrong();
+        showToast('فشل التحقق من الاتصال');
+      }
+    } catch {
+      setDbTestResult({
+        success: false,
+        message: 'تعذر الاتصال بالخادم لإجراء فحص قاعدة البيانات'
+      });
+      sounds.playWrong();
+    } finally {
+      setIsTestingDb(false);
+    }
+  };
+
+  // Save & Apply Database Connection
+  const handleSaveDatabaseConfig = async () => {
+    const url = dbConfigUrl.trim();
+    if (!url) {
+      showToast('يرجى كتابة أو لصق رابط الاتصال بقاعدة البيانات');
+      return;
+    }
+    setIsSavingDb(true);
+    setDbTestResult(null);
+    try {
+      const res = await fetch('/api/admin/database-config', {
+        method: 'POST',
+        headers: getAdminAuthHeaders(),
+        body: JSON.stringify({ connectionUrl: url })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDbTestResult({ success: true, message: data.message });
+        showToast('تم تفعيل الاتصال السحابي بقاعدة البيانات بنجاح!');
+        sounds.playSuccess();
+        setDbConfigUrl('');
+        await loadData();
+      } else {
+        setDbTestResult({
+          success: false,
+          message: data.error || data.message || 'فشل تفعيل الاتصال بقاعدة البيانات'
+        });
+        sounds.playWrong();
+        showToast('فشل تفعيل الاتصال بقاعدة البيانات');
+      }
+    } catch {
+      showToast('حدث خطأ أثناء حفظ الإعدادات');
+      sounds.playWrong();
+    } finally {
+      setIsSavingDb(false);
+    }
+  };
+
+  // Reset to default local fallback
+  const handleResetDatabaseConfig = async () => {
+    if (!confirm('هل تريد إعادة ضبط الاتصال والعودة إلى التخزين الافتراضي؟')) return;
+    setIsSavingDb(true);
+    try {
+      const res = await fetch('/api/admin/database-config', {
+        method: 'POST',
+        headers: getAdminAuthHeaders(),
+        body: JSON.stringify({ action: 'reset' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('تمت إعادة ضبط الاتصال للتخزين المحلي بنجاح');
+        sounds.playTap();
+        setDbTestResult(null);
+        await loadData();
+      }
+    } catch {
+      showToast('تعذر إعادة ضبط الاتصال');
+    } finally {
+      setIsSavingDb(false);
+    }
+  };
+
+  // 1-Click Restore Full Backup File (Students + Tests)
+  const handleRestoreFullBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsRestoringBackup(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        const payload: { students?: any[]; tests?: any[] } = {};
+
+        if (Array.isArray(parsed)) {
+          payload.students = parsed;
+        } else if (parsed && typeof parsed === 'object') {
+          if (Array.isArray(parsed.students)) payload.students = parsed.students;
+          if (Array.isArray(parsed.tests)) payload.tests = parsed.tests;
+        }
+
+        if (!payload.students?.length && !payload.tests?.length) {
+          showToast('الملف المرفوع لا يحتوي على بيانات صالحة');
+          setIsRestoringBackup(false);
+          return;
+        }
+
+        const res = await fetch('/api/admin/restore', {
+          method: 'POST',
+          headers: getAdminAuthHeaders(),
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          showToast(data.message || 'تمت استعادة البيانات بالكامل بنجاح!');
+          sounds.playSuccess();
+          await loadData();
+        } else {
+          showToast(data.error || 'فشلت استعادة البيانات من الملف');
+          sounds.playWrong();
+        }
+      } catch {
+        showToast('ملف النسخة الاحتياطية تالف أو غير صالح');
+        sounds.playWrong();
+      } finally {
+        setIsRestoringBackup(false);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -437,7 +621,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <div>
               <h2 className="text-base font-black text-white">تسجيل دخول المشرف العام</h2>
               <p className="text-[11px] text-slate-400 mt-1">
-                مخصص للأستاذ أسامة العابدي
+                مخصص للأستاذ أسامة إبراهيم الأبيدي
               </p>
             </div>
 
@@ -558,9 +742,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Live Database Network Status Pill */}
+            <button
+              onClick={() => { sounds.playTap(); setActiveTab('database'); }}
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                dbStatus?.connected
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+              }`}
+              title="انقر لفتح إدارة قاعدة البيانات والشبكة"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>{dbStatus?.connected ? 'قاعدة البيانات: متصل 🟢' : 'تخزين محلي مؤقت 🟡'}</span>
+            </button>
+
             <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{localStorage.getItem('riyadh_admin_email') || 'المشرف العام'}</span>
+              <span>أ. أسامة إبراهيم الأبيدي</span>
             </div>
             <RiyadhEbdaaLogo size="xs" />
             <button
@@ -642,6 +840,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 {toHindi(liveRooms.length)}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => { sounds.playTap(); setActiveTab('database'); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors ${
+              activeTab === 'database'
+                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20'
+                : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5 text-cyan-300" />
+            <span>قاعدة البيانات والشبكة</span>
+            <span className={`w-2 h-2 rounded-full ${dbStatus?.connected ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
           </button>
         </div>
       </header>
@@ -1352,7 +1563,309 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </div>
           </div>
         )}
-      </main>
+
+        {/* ========================================================= */}
+        {/* TAB 6: CLOUD DATABASE & NETWORK PERSISTENCE MANAGEMENT */}
+        {/* ========================================================= */}
+        {activeTab === 'database' && (
+          <div className="space-y-4">
+            {/* Top Status Card */}
+            <div className={`p-4 rounded-2xl border transition-all ${
+              dbStatus?.connected
+                ? 'bg-slate-900/90 border-emerald-500/40 shadow-lg shadow-emerald-500/5'
+                : 'bg-slate-900/90 border-amber-500/40 shadow-lg shadow-amber-500/5'
+            }`}>
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    dbStatus?.connected
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  }`}>
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm sm:text-base font-black text-white">
+                        مركز إدارة الشبكة وقاعدة البيانات السحابية
+                      </h2>
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                        dbStatus?.connected
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      }`}>
+                        {dbStatus?.connected ? 'متصل سحابياً 🟢' : 'تخزين مؤقت على الخادم 🟡'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {dbStatus?.connected
+                        ? 'قاعدة البيانات السحابية (PostgreSQL / Supabase) نشطة ومستقرة، وجميع البيانات محفوظة ومزامنة عبر الشبكة.'
+                        : 'البيانات تُحفظ حالياً في الذاكرة المؤقتة. للربط الشبكي الدائم عبر جميع الأجهزة والجوالات، فعّل قاعدة بيانات سحابية أدناه.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-stretch md:self-auto justify-end">
+                  <button
+                    onClick={() => { sounds.playTap(); loadData(); }}
+                    disabled={isLoading}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-amber-400' : ''}`} />
+                    <span>تحديث الحالة</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3">
+                <div className="bg-slate-950/70 border border-slate-800 p-2.5 rounded-xl">
+                  <div className="text-[10px] text-slate-400 font-bold mb-0.5 flex items-center gap-1">
+                    <Users className="w-3 h-3 text-cyan-400" />
+                    <span>الطلاب المسجلون</span>
+                  </div>
+                  <div className="text-base font-black text-white font-mono">
+                    {toHindi(dbStatus?.studentsCount ?? students.length)}
+                  </div>
+                  <div className="text-[9px] text-slate-500">في سجل المدرسة</div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 p-2.5 rounded-xl">
+                  <div className="text-[10px] text-slate-400 font-bold mb-0.5 flex items-center gap-1">
+                    <FileSpreadsheet className="w-3 h-3 text-emerald-400" />
+                    <span>جلسات الاختبارات</span>
+                  </div>
+                  <div className="text-base font-black text-white font-mono">
+                    {toHindi(dbStatus?.testsCount ?? testSessions.length)}
+                  </div>
+                  <div className="text-[9px] text-slate-500">سجل النتائج الشامل</div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 p-2.5 rounded-xl">
+                  <div className="text-[10px] text-slate-400 font-bold mb-0.5 flex items-center gap-1">
+                    <Server className="w-3 h-3 text-amber-400" />
+                    <span>نوع المحرك</span>
+                  </div>
+                  <div className="text-xs font-black text-amber-300 truncate">
+                    {dbStatus?.type === 'postgresql' ? 'PostgreSQL سحابي' : 'ذاكرة الخادم (Memory)'}
+                  </div>
+                  <div className="text-[9px] text-slate-500 truncate">
+                    {dbStatus?.connectionHost || 'محلي'}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 p-2.5 rounded-xl">
+                  <div className="text-[10px] text-slate-400 font-bold mb-0.5 flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-indigo-400" />
+                    <span>سرعة الاتصال</span>
+                  </div>
+                  <div className="text-base font-black text-emerald-400 font-mono">
+                    {dbStatus?.latencyMs ? `${toHindi(dbStatus.latencyMs)} ms` : 'مباشر'}
+                  </div>
+                  <div className="text-[9px] text-slate-500">زمن الاستجابة</div>
+                </div>
+              </div>
+
+              {dbStatus?.maskedUrl && (
+                <div className="mt-2.5 px-3 py-1.5 rounded-lg bg-slate-950/90 border border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span className="text-slate-500">الاتصال النشط:</span>
+                    <span className="text-slate-300 truncate">{dbStatus.maskedUrl}</span>
+                  </div>
+                  {dbStatus.isCustom && (
+                    <button
+                      onClick={handleResetDatabaseConfig}
+                      className="text-rose-400 hover:text-rose-300 font-sans text-[10px] underline shrink-0 mr-2"
+                    >
+                      إلغاء والعودة للافتراضي
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Connection Configuration Form */}
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-cyan-400" />
+                    <span>ربط وتفعيل قاعدة بيانات سحابية (Supabase / PostgreSQL)</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    ألصق رابط الاتصال (Connection String) الخاص بقاعدة بياناتك السحابية لحفظ كل التعديلات بشكل دائم.
+                  </p>
+                </div>
+                <a
+                  href="https://supabase.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30 flex items-center gap-1 transition-colors"
+                >
+                  <span>إنشاء Supabase مجاني</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              <div className="space-y-2">
+                <div className="relative">
+                  <input
+                    type="password"
+                    dir="ltr"
+                    value={dbConfigUrl}
+                    onChange={e => setDbConfigUrl(e.target.value)}
+                    placeholder="postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-cyan-300 placeholder-slate-600 outline-none focus:border-cyan-400"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => handleTestDatabase()}
+                    disabled={isTestingDb || !dbConfigUrl.trim()}
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Zap className={`w-3.5 h-3.5 text-amber-400 ${isTestingDb ? 'animate-bounce' : ''}`} />
+                    <span>{isTestingDb ? 'جارٍ الفحص...' : 'فحص الاتصال فقط'}</span>
+                  </button>
+
+                  <button
+                    onClick={handleSaveDatabaseConfig}
+                    disabled={isSavingDb || !dbConfigUrl.trim()}
+                    className="px-4 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-600/20 transition-colors"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{isSavingDb ? 'جارٍ التفعيل...' : 'تفعيل وحفظ الاتصال السحابي'}</span>
+                  </button>
+
+                  {dbStatus?.isCustom && (
+                    <button
+                      onClick={handleResetDatabaseConfig}
+                      className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-bold border border-rose-500/20 transition-colors"
+                    >
+                      إعادة الضبط
+                    </button>
+                  )}
+                </div>
+
+                {/* Test Feedback Notice */}
+                {dbTestResult && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`p-3 rounded-xl border text-xs font-bold flex items-start gap-2 ${
+                      dbTestResult.success
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                        : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    {dbTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <div>{dbTestResult.message}</div>
+                      {dbTestResult.latencyMs && (
+                        <div className="text-[10px] text-emerald-400/80 font-mono mt-0.5">
+                          زمن الاستجابة: {toHindi(dbTestResult.latencyMs)} مللي ثانية
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            </div>
+
+            {/* 1-Click Backup & Restore Suite */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Export Full Backup */}
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Download className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-xs font-black text-white">تصدير نسخة احتياطية شاملة (JSON)</h3>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    تنزيل ملف نسخة احتياطية يحتوي على كافة الطلاب، الفصول، الشُعب، وسجلات الاختبارات في ملف واحد لحمايتها على جهازك.
+                  </p>
+                </div>
+                <button
+                  onClick={handleDownloadFullBackup}
+                  className="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>تحميل النسخة الكاملة الآن (JSON)</span>
+                </button>
+              </div>
+
+              {/* Restore Full Backup */}
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-indigo-400" />
+                    <h3 className="text-xs font-black text-white">استعادة البيانات من نسخة احتياطية</h3>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    رفع ملف نسخة احتياطية سابقة لمزامنة وتحديث كافة بيانات الطلاب والاختبارات مباشرة في قاعدة البيانات.
+                  </p>
+                </div>
+                <label className="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 transition-colors cursor-pointer">
+                  <Upload className="w-4 h-4" />
+                  <span>{isRestoringBackup ? 'جارٍ الاستعادة...' : 'اختيار ملف الاستعادة (JSON)'}</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleRestoreFullBackup}
+                    disabled={isRestoringBackup}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Quick 3-Step Supabase Guide */}
+            <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl space-y-2.5">
+              <h3 className="text-xs font-black text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>دليل الربط السحابي السريع المجاني في دقيقتين (خطوة بخطوة)</span>
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+                <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-1">
+                  <div className="flex items-center gap-1.5 text-cyan-400 font-bold text-[11px]">
+                    <span className="w-5 h-5 rounded-full bg-cyan-500/20 flex items-center justify-center text-[10px]">١</span>
+                    <span>إنشاء مشروع Supabase مجاني</span>
+                  </div>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    افتح موقع <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-cyan-400 underline">supabase.com</a> وأنشئ حساباً جديداً ثم اضغط New Project واختر كلمة مرور لقاعدة البيانات.
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-1">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-[11px]">
+                    <span className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px]">٢</span>
+                    <span>نسخ رابط Connection String</span>
+                  </div>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    من القائمة الجانبية في Supabase، انتقل إلى Project Settings ثم Database، ومن قسم Connection string انسخ رابط URI المباشر.
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-1">
+                  <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[11px]">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px]">٣</span>
+                    <span>التفعيل والتشغيل التلقائي</span>
+                  </div>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    ألصق الرابط في الحقل أعلاه واضغط "تفعيل وحفظ الاتصال". سيقوم النظام تلقائياً بإنشاء جميع الجداول وترحيل بياناتك لتبقى محفوظة للأبد على الشبكة.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        </main>
 
       {/* Edit / Add Single Student Modal */}
       <AnimatePresence>

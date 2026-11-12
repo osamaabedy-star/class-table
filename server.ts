@@ -4,7 +4,7 @@ import { dirname, join } from 'path';
 import fs from 'fs';
 import type { Request, Response } from 'express';
 import crypto from 'crypto';
-import { dbAdapter } from './src/services/dbAdapter';
+import { dbAdapter, setCustomDatabaseUrl, testDatabaseConnection } from './src/services/dbAdapter';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1182,76 +1182,70 @@ app.post('/api/admin/login', (req: Request, res: Response) => {
 });
 
 // 1. Get school students
-app.get('/api/school/students', (req: Request, res: Response) => {
-  const students = loadSchoolStudents();
-  res.json({ students });
+app.get('/api/school/students', async (req: Request, res: Response) => {
+  try {
+    const students = await dbAdapter.getStudents();
+    res.json({ students });
+  } catch (err: any) {
+    const students = loadSchoolStudents();
+    res.json({ students });
+  }
 });
 
 // 2. Batch upload / replace students (Protected: Admin Auth Required)
-app.post('/api/school/students/batch', requireAdminAuth, (req: Request, res: Response) => {
+app.post('/api/school/students/batch', requireAdminAuth, async (req: Request, res: Response) => {
   const { students, mode } = req.body;
   if (!Array.isArray(students)) {
     res.status(400).json({ error: 'قائمة الطلاب غير صالحة' });
     return;
   }
-  let current = loadSchoolStudents();
-  if (mode === 'replace') {
-    current = students;
-  } else {
-    for (const newSt of students) {
-      const existingIdx = current.findIndex(s => s.id === newSt.id || (s.name === newSt.name && s.gradeId === newSt.gradeId));
-      if (existingIdx >= 0) {
-        current[existingIdx] = { ...current[existingIdx], ...newSt };
-      } else {
-        current.push(newSt);
-      }
-    }
+  try {
+    const updated = await dbAdapter.saveStudents(students, mode || 'replace');
+    saveSchoolStudents(updated);
+    res.json({ success: true, count: updated.length, students: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل حفظ قائمة الطلاب في قاعدة البيانات' });
   }
-  saveSchoolStudents(current);
-  res.json({ success: true, count: current.length, students: current });
 });
 
 // 3. Add or update single student (Protected: Admin Auth Required)
-app.post('/api/school/students', requireAdminAuth, (req: Request, res: Response) => {
+app.post('/api/school/students', requireAdminAuth, async (req: Request, res: Response) => {
   const studentData: SchoolStudent = req.body;
   if (!studentData || !studentData.name) {
     res.status(400).json({ error: 'اسم الطالب مطلوب' });
     return;
   }
-  const current = loadSchoolStudents();
-  const existingIdx = current.findIndex(s => s.id === studentData.id);
-  if (existingIdx >= 0) {
-    current[existingIdx] = { ...current[existingIdx], ...studentData };
-  } else {
-    current.push({
-      ...studentData,
-      id: studentData.id || `student-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      level: studentData.level || 1,
-      participationCount: studentData.participationCount || 0,
-      totalScore: studentData.totalScore || 0,
-      correctCount: studentData.correctCount || 0,
-      totalAnswered: studentData.totalAnswered || 0,
-      bestStreak: studentData.bestStreak || 0,
-      lastActiveDate: studentData.lastActiveDate || 'لم يشارك'
-    });
+  try {
+    const updated = await dbAdapter.addOrUpdateStudent(studentData);
+    saveSchoolStudents(updated);
+    res.json({ success: true, students: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل حفظ بيانات الطالب' });
   }
-  saveSchoolStudents(current);
-  res.json({ success: true, students: current });
 });
 
 // 4. Delete student (Protected: Admin Auth Required)
-app.delete('/api/school/students/:id', requireAdminAuth, (req: Request, res: Response) => {
+app.delete('/api/school/students/:id', requireAdminAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const current = loadSchoolStudents();
-  const filtered = current.filter(s => s.id !== id);
-  saveSchoolStudents(filtered);
-  res.json({ success: true, count: filtered.length });
+  try {
+    await dbAdapter.deleteStudent(id);
+    const updated = await dbAdapter.getStudents();
+    saveSchoolStudents(updated);
+    res.json({ success: true, count: updated.length });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل حذف الطالب' });
+  }
 });
 
 // 5. Clear all students (Protected: Admin Auth Required)
-app.delete('/api/school/students', requireAdminAuth, (req: Request, res: Response) => {
-  saveSchoolStudents([]);
-  res.json({ success: true, count: 0 });
+app.delete('/api/school/students', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    await dbAdapter.clearStudents();
+    saveSchoolStudents([]);
+    res.json({ success: true, count: 0 });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل مسح القوائم' });
+  }
 });
 
 // 6. Record game participation results into school roster (Idempotent & Protected)
@@ -1300,99 +1294,14 @@ app.post('/api/school/record-game', async (req: Request, res: Response) => {
 });
 
 // 7. Get comprehensive school analytics & honor rolls
-app.get('/api/school/analytics', (req: Request, res: Response) => {
-  const students = loadSchoolStudents();
-  
-  const totalStudents = students.length;
-  const totalParticipations = students.reduce((acc, s) => acc + (s.participationCount || 0), 0);
-  const totalScoreAll = students.reduce((acc, s) => acc + (s.totalScore || 0), 0);
-  const totalCorrectAll = students.reduce((acc, s) => acc + (s.correctCount || 0), 0);
-  const totalAnsweredAll = students.reduce((acc, s) => acc + (s.totalAnswered || 0), 0);
-
-  const overallAccuracy = totalAnsweredAll > 0 
-    ? Math.round((totalCorrectAll / totalAnsweredAll) * 100) 
-    : 0;
-
-  const gradeKeys = [
-    { id: 'grade3', name: 'الصف الثالث الابتدائي' },
-    { id: 'grade4', name: 'الصف الرابع الابتدائي' },
-    { id: 'grade5', name: 'الصف الخامس الابتدائي' },
-    { id: 'grade6', name: 'الصف السادس الابتدائي' }
-  ];
-
-  const gradeStats = gradeKeys.map(g => {
-    const gradeStudents = students.filter(s => s.gradeId === g.id);
-    const count = gradeStudents.length;
-    const participations = gradeStudents.reduce((acc, s) => acc + (s.participationCount || 0), 0);
-    const totalScore = gradeStudents.reduce((acc, s) => acc + (s.totalScore || 0), 0);
-    const correct = gradeStudents.reduce((acc, s) => acc + (s.correctCount || 0), 0);
-    const answered = gradeStudents.reduce((acc, s) => acc + (s.totalAnswered || 0), 0);
-    const accuracy = answered > 0 ? Math.round((correct / answered) * 100) : 0;
-    const avgScore = count > 0 ? Math.round(totalScore / count) : 0;
-
-    const topStudent = [...gradeStudents].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))[0] || null;
-
-    return {
-      gradeId: g.id,
-      gradeName: g.name,
-      studentCount: count,
-      participations,
-      avgScore,
-      accuracy,
-      topStudent: topStudent ? { name: topStudent.name, score: topStudent.totalScore, section: topStudent.section } : null
-    };
-  });
-
-  const sectionMap: Record<string, { count: number; participations: number; totalScore: number }> = {};
-  for (const s of students) {
-    const key = `${s.gradeName} - شعبة ${s.section}`;
-    if (!sectionMap[key]) {
-      sectionMap[key] = { count: 0, participations: 0, totalScore: 0 };
-    }
-    sectionMap[key].count += 1;
-    sectionMap[key].participations += (s.participationCount || 0);
-    sectionMap[key].totalScore += (s.totalScore || 0);
+app.get('/api/school/analytics', async (req: Request, res: Response) => {
+  try {
+    const analytics = await dbAdapter.getAnalytics();
+    res.json(analytics);
+  } catch (err: any) {
+    console.error('[API analytics error]:', err);
+    res.status(500).json({ error: 'فشل جلب الإحصائيات المدرسية' });
   }
-
-  const sectionStats = Object.entries(sectionMap).map(([title, val]) => ({
-    title,
-    studentCount: val.count,
-    participations: val.participations,
-    avgScore: val.count > 0 ? Math.round(val.totalScore / val.count) : 0
-  }));
-
-  const topOverall = [...students]
-    .filter(s => (s.participationCount || 0) > 0)
-    .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))
-    .slice(0, 10);
-
-  const masteryStars = [...students]
-    .filter(s => (s.totalAnswered || 0) >= 3 && (s.correctCount / s.totalAnswered) >= 0.8)
-    .sort((a, b) => {
-      const accA = a.correctCount / a.totalAnswered;
-      const accB = b.correctCount / b.totalAnswered;
-      return accB - accA;
-    })
-    .slice(0, 8);
-
-  const mostActive = [...students]
-    .filter(s => (s.participationCount || 0) > 0)
-    .sort((a, b) => (b.participationCount || 0) - (a.participationCount || 0))
-    .slice(0, 8);
-
-  res.json({
-    totalStudents,
-    totalParticipations,
-    overallAccuracy,
-    totalScoreAll,
-    gradeStats,
-    sectionStats,
-    honorRolls: {
-      topOverall,
-      masteryStars,
-      mostActive
-    }
-  });
 });
 
 // -------------------------------------------------------------
@@ -1438,19 +1347,25 @@ function saveTestSessions(list: any[]) {
 }
 
 // 8. Get test sessions database
-app.get('/api/school/tests', (req: Request, res: Response) => {
-  const tests = loadTestSessions();
-  res.json({ tests });
+app.get('/api/school/tests', async (req: Request, res: Response) => {
+  try {
+    const tests = await dbAdapter.getTests();
+    res.json({ tests });
+  } catch (err: any) {
+    const tests = loadTestSessions();
+    res.json({ tests });
+  }
 });
 
 // 9. Record a test session into the database (Protected against unauthorized modification)
-app.post('/api/school/tests', (req: Request, res: Response) => {
+app.post('/api/school/tests', async (req: Request, res: Response) => {
   const { test } = req.body;
   if (!test || !test.id) {
     res.status(400).json({ error: 'بيانات الاختبار غير مكتملة' });
     return;
   }
-  const current = loadTestSessions();
+  
+  const current = await dbAdapter.getTests();
   const existingIdx = current.findIndex(t => t.id === test.id);
   if (existingIdx >= 0) {
     // Modifying existing test session requires Admin authorization
@@ -1460,79 +1375,145 @@ app.post('/api/school/tests', (req: Request, res: Response) => {
       res.status(403).json({ error: 'غير مصرح: تعديل الاختبارات المسجلة سابقاً يتطلب صلاحية مسؤول النظام' });
       return;
     }
-    current[existingIdx] = test;
   } else {
     // Validate minimal structure for new test
     if (!test.title || !test.gradeId || !Array.isArray(test.participants || test.activeStudents)) {
       res.status(400).json({ error: 'بيانات الاختبار غير مكتملة أو غير صالحة' });
       return;
     }
-    current.unshift(test); // newest first
   }
-  saveTestSessions(current);
-  res.json({ success: true, count: current.length, tests: current });
+
+  try {
+    const updated = await dbAdapter.saveTest(test);
+    saveTestSessions(updated);
+    res.json({ success: true, count: updated.length, tests: updated });
+  } catch (err: any) {
+    console.error('[API saveTest error]:', err);
+    res.status(500).json({ error: 'فشل حفظ سجل الاختبار في قاعدة البيانات' });
+  }
 });
 
 // 10. Delete a test session (Protected: Admin Auth Required)
-app.delete('/api/school/tests/:id', requireAdminAuth, (req: Request, res: Response) => {
+app.delete('/api/school/tests/:id', requireAdminAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const current = loadTestSessions();
-  const filtered = current.filter(t => t.id !== id);
-  saveTestSessions(filtered);
-  res.json({ success: true, count: filtered.length });
+  try {
+    await dbAdapter.deleteTest(id);
+    const updated = await dbAdapter.getTests();
+    saveTestSessions(updated);
+    res.json({ success: true, count: updated.length });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل حذف الاختبار' });
+  }
 });
 
 // 11. Clear test sessions (Protected: Admin Auth Required)
-app.delete('/api/school/tests', requireAdminAuth, (req: Request, res: Response) => {
-  saveTestSessions([]);
-  res.json({ success: true, count: 0 });
+app.delete('/api/school/tests', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    await dbAdapter.clearTests();
+    saveTestSessions([]);
+    res.json({ success: true, count: 0 });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل مسح الاختبارات' });
+  }
 });
 
 // 12. Create complete database backup (Protected: Admin Auth Required)
-app.get('/api/admin/backup', requireAdminAuth, (req: Request, res: Response) => {
-  const students = loadSchoolStudents();
-  const tests = loadTestSessions();
-  const activeRooms = Object.values(rooms).map(r => ({
-    id: r.id,
-    title: r.title,
-    createdAt: r.createdAt,
-    status: r.status
-  }));
+app.get('/api/admin/backup', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const backup = await dbAdapter.createFullBackup();
+    res.json(backup);
+  } catch (err: any) {
+    console.error('[API backup error]:', err);
+    res.status(500).json({ error: 'فشل إنشاء النسخة الاحتياطية' });
+  }
+});
+
+// 13. Restore database from backup (Protected: Admin Auth Required)
+app.post('/api/admin/restore', requireAdminAuth, async (req: Request, res: Response) => {
+  const { students, tests } = req.body || {};
+  if (!Array.isArray(students) && !Array.isArray(tests)) {
+    res.status(400).json({ error: 'ملف النسخة الاحتياطية غير صالح' });
+    return;
+  }
+  try {
+    const result = await dbAdapter.restoreBackup({ students, tests });
+    const currentStudents = await dbAdapter.getStudents();
+    const currentTests = await dbAdapter.getTests();
+    saveSchoolStudents(currentStudents);
+    saveTestSessions(currentTests);
+    res.json({
+      success: true,
+      message: `تم استعادة ${result.restoredStudents} طالب و ${result.restoredTests} جلسة اختبار بنجاح`,
+      ...result
+    });
+  } catch (err: any) {
+    console.error('[API restore error]:', err);
+    res.status(500).json({ error: 'فشل استعادة البيانات من النسخة الاحتياطية', details: err?.message });
+  }
+});
+
+// 14. Configure & Test Cloud Database Connection (Protected: Admin Auth Required)
+app.post('/api/admin/database-config', requireAdminAuth, async (req: Request, res: Response) => {
+  const { connectionUrl, action } = req.body || {};
+
+  if (action === 'reset') {
+    setCustomDatabaseUrl(null);
+    const status = await dbAdapter.getStorageStatus();
+    res.json({
+      success: true,
+      message: 'تمت إعادة ضبط إعدادات الاتصال للتخزين المحلي بنجاح',
+      status
+    });
+    return;
+  }
+
+  if (action === 'test-only') {
+    if (!connectionUrl || typeof connectionUrl !== 'string') {
+      res.status(400).json({ error: 'رابط الاتصال مطلوب للفحص' });
+      return;
+    }
+    const testResult = await testDatabaseConnection(connectionUrl);
+    res.json(testResult);
+    return;
+  }
+
+  if (!connectionUrl || typeof connectionUrl !== 'string') {
+    res.status(400).json({ error: 'رابط الاتصال بقاعدة البيانات مطلوب' });
+    return;
+  }
+
+  // 1. Verify connection first
+  const testResult = await testDatabaseConnection(connectionUrl);
+  if (!testResult.success) {
+    res.status(400).json(testResult);
+    return;
+  }
+
+  // 2. Set active custom connection URL
+  setCustomDatabaseUrl(connectionUrl);
+  const status = await dbAdapter.getStorageStatus();
 
   res.json({
-    timestamp: Date.now(),
-    date: new Date().toISOString(),
-    school: 'مدارس رياض الإبداع',
-    counts: {
-      students: students.length,
-      tests: tests.length,
-      rooms: activeRooms.length
-    },
-    students,
-    tests
+    success: true,
+    message: 'تم تفعيل الاتصال السحابي بقاعدة البيانات بنجاح! جميع البيانات سيتم حفظها وتزامنها عبر الشبكة.',
+    status
   });
 });
 
-// 13. System Health & Storage Status (Protected: Admin Auth Required)
-app.get('/api/admin/health', requireAdminAuth, (req: Request, res: Response) => {
-  const students = loadSchoolStudents();
-  const tests = loadTestSessions();
+// 15. System Health & Storage Status (Protected: Admin Auth Required)
+app.get('/api/admin/health', requireAdminAuth, async (req: Request, res: Response) => {
+  const status = await dbAdapter.getStorageStatus();
   res.json({
     status: 'ok',
     timestamp: Date.now(),
     uptime: process.uptime(),
-    storage: {
-      type: 'hybrid-file-memory',
-      studentsCount: students.length,
-      testsCount: tests.length,
-      roomsCount: Object.keys(rooms).length
-    },
+    storage: status,
     nodeEnv: process.env.NODE_ENV || 'development',
     isVercel: Boolean(process.env.VERCEL)
   });
 });
 
-// 14. Real Database Connection & Query Test
+// 16. Real Database Connection & Query Test
 app.get('/api/school/db-test', async (req: Request, res: Response) => {
   const start = Date.now();
   try {

@@ -28,7 +28,12 @@ import {
   Swords,
   Database,
   FileDown,
-  SkipForward
+  SkipForward,
+  Coffee,
+  Pause,
+  PlayCircle,
+  Plus,
+  Minus
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { sounds } from '../utils/audio';
@@ -150,6 +155,14 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
   const [lastCorrect, setLastCorrect] = useState<boolean>(false);
   const [intermissionTimer, setIntermissionTimer] = useState<number>(3);
+
+  // Break & Question Pool tracking (لا تتكرر الأسئلة إلا إذا استُنفدت كل الاحتمالات + استراحة كل 10 أسئلة)
+  const [questionPool, setQuestionPool] = useState<Question[]>([]);
+  const [questionPoolIndex, setQuestionPoolIndex] = useState<number>(0);
+  const [totalQuestionsAnsweredCount, setTotalQuestionsAnsweredCount] = useState<number>(0);
+  const [isBreakPending, setIsBreakPending] = useState<boolean>(false);
+  const [isBreakActive, setIsBreakActive] = useState<boolean>(false);
+  const [breakInterval, setBreakInterval] = useState<number>(10);
 
   useEffect(() => {
     sounds.enabled = soundOn;
@@ -309,87 +322,113 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
     });
   };
 
+  // إنشاء بنك الأسئلة الشامل دون تكرار لأي جدول أو مسألة
+  const buildComprehensiveQuestionPool = (): Question[] => {
+    const valid = selectedTables.length > 0 ? selectedTables : [2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const rawCandidates: Array<{ a: number; b: number; operation: '×' | '÷'; answer: number }> = [];
+
+    for (const table of valid) {
+      for (let factor = 1; factor <= 12; factor++) {
+        if (opMode === 'multi' || opMode === 'mixed') {
+          rawCandidates.push({
+            a: table,
+            b: factor,
+            operation: '×',
+            answer: table * factor
+          });
+        }
+        if (opMode === 'divi' || opMode === 'mixed') {
+          const product = table * factor;
+          rawCandidates.push({
+            a: product,
+            b: table,
+            operation: '÷',
+            answer: factor
+          });
+        }
+      }
+    }
+
+    // خلط الأسئلة عشوائياً (Fisher-Yates)
+    const shuffled = [...rawCandidates];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    return shuffled.map(c => {
+      const answer = c.answer;
+      const opts = new Set<number>([answer]);
+
+      if (c.operation === '÷') {
+        const pool = [
+          answer + 1, answer - 1, answer + 2, answer - 2,
+          answer + 3, answer - 3, c.b + 1, c.b - 1, c.b
+        ].filter(x => x > 0 && x !== answer);
+        pool.sort(() => Math.random() - 0.5);
+        for (const p of pool) {
+          opts.add(p);
+          if (opts.size >= 4) break;
+        }
+        let fallback = answer > 3 ? answer - 2 : 1;
+        while (opts.size < 4) {
+          if (fallback > 0 && fallback !== answer) opts.add(fallback);
+          fallback++;
+        }
+      } else {
+        const table = c.a;
+        const factor = c.b;
+        const pool = [
+          answer + table, answer - table, answer + 1, answer - 1,
+          answer + 2, answer - 2, answer + 10, answer - 10,
+          (table + 1) * factor, (table - 1) * factor,
+          table * (factor + 1), table * (factor - 1)
+        ].filter(x => x > 0 && x !== answer);
+        pool.sort(() => Math.random() - 0.5);
+        for (const p of pool) {
+          opts.add(p);
+          if (opts.size >= 4) break;
+        }
+        let fallback = answer > 5 ? answer - 4 : 1;
+        while (opts.size < 4) {
+          if (fallback > 0 && fallback !== answer) opts.add(fallback);
+          fallback++;
+        }
+      }
+
+      return {
+        a: c.a,
+        b: c.b,
+        operation: c.operation,
+        answer: c.answer,
+        options: Array.from(opts).sort(() => Math.random() - 0.5)
+      };
+    });
+  };
+
+  const getNextQuestionFromPool = (currentPool: Question[], currentIndex: number): { q: Question; nextPool: Question[]; nextIndex: number } => {
+    let pool = currentPool;
+    let idx = currentIndex;
+
+    // إذا انتهت كل الأسئلة في بنك الأسئلة بالكامل، نعيد خلط وإنشاء بنك جديد حتى لا تتكرر إلا عند استنفاد الكل
+    if (pool.length === 0 || idx >= pool.length) {
+      pool = buildComprehensiveQuestionPool();
+      idx = 0;
+    }
+
+    const q = pool[idx];
+    return {
+      q,
+      nextPool: pool,
+      nextIndex: idx + 1
+    };
+  };
+
   const generateSingleQuestion = (): Question => {
-    let valid = selectedTables.length > 0 ? selectedTables : [2, 3, 4, 5, 6, 7, 8, 9, 10];
-    
-    // Adaptive difficulty: if enabled and student has good streak, pick more challenging tables
-    const currentStd = activeStudents[currentStudentIndex];
-    if (adaptiveDifficulty && currentStd && currentStd.correctAnswers >= 2) {
-      const advanced = valid.filter(t => t >= 6);
-      if (advanced.length > 0) valid = advanced;
-    }
-
-    const table = valid[Math.floor(Math.random() * valid.length)] || 2;
-    const factor = Math.floor(Math.random() * 11) + 2;
-    const isDiv = opMode === 'divi' || (opMode === 'mixed' && Math.random() > 0.5);
-
-    if (isDiv) {
-      const product = table * factor;
-      const answer = factor;
-      const opts = new Set<number>([answer]);
-      const pool = [
-        answer + 1,
-        answer - 1,
-        answer + 2,
-        answer - 2,
-        answer + 3,
-        answer - 3,
-        factor + 1,
-        factor - 1,
-        table
-      ].filter(x => x > 0 && x !== answer);
-      pool.sort(() => Math.random() - 0.5);
-      for (const p of pool) {
-        opts.add(p);
-        if (opts.size >= 4) break;
-      }
-      let fallback = answer > 3 ? answer - 2 : 1;
-      while (opts.size < 4) {
-        if (fallback > 0 && fallback !== answer) opts.add(fallback);
-        fallback++;
-      }
-      return {
-        a: product,
-        b: table,
-        operation: '÷',
-        answer,
-        options: Array.from(opts).sort(() => Math.random() - 0.5)
-      };
-    } else {
-      const answer = table * factor;
-      const opts = new Set<number>([answer]);
-      const pool = [
-        answer + table,
-        answer - table,
-        answer + 1,
-        answer - 1,
-        answer + 2,
-        answer - 2,
-        answer + 10,
-        answer - 10,
-        (table + 1) * factor,
-        (table - 1) * factor,
-        table * (factor + 1),
-        table * (factor - 1)
-      ].filter(x => x > 0 && x !== answer);
-      pool.sort(() => Math.random() - 0.5);
-      for (const p of pool) {
-        opts.add(p);
-        if (opts.size >= 4) break;
-      }
-      let fallback = answer > 5 ? answer - 4 : 1;
-      while (opts.size < 4) {
-        if (fallback > 0 && fallback !== answer) opts.add(fallback);
-        fallback++;
-      }
-      return {
-        a: table,
-        b: factor,
-        operation: '×',
-        answer,
-        options: Array.from(opts).sort(() => Math.random() - 0.5)
-      };
-    }
+    const res = getNextQuestionFromPool(questionPool, questionPoolIndex);
+    setQuestionPool(res.nextPool);
+    setQuestionPoolIndex(res.nextIndex);
+    return res.q;
   };
 
   const startClassCompetition = () => {
@@ -408,10 +447,20 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
 
     if (chosenList.length === 0) return;
 
+    // تهيئة بنك الأسئلة الشامل دون تكرار
+    const initialPool = buildComprehensiveQuestionPool();
+    const firstQ = initialPool[0];
+
+    setQuestionPool(initialPool);
+    setQuestionPoolIndex(1);
+    setTotalQuestionsAnsweredCount(0);
+    setIsBreakPending(false);
+    setIsBreakActive(false);
+
     setActiveStudents(chosenList);
     setCurrentStudentIndex(0);
     setCurrentRound(1);
-    setCurrentQ(generateSingleQuestion());
+    setCurrentQ(firstQ);
     setTimeLeft(timeLimit);
     setIsAnswered(false);
     setSelectedOption(null);
@@ -478,11 +527,25 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       );
     }
 
-    setIntermissionTimer(2);
-    setGameState('intermission');
+    const nextCount = totalQuestionsAnsweredCount + 1;
+    setTotalQuestionsAnsweredCount(nextCount);
+
+    // التحقق هل حان وقت الاستراحة (كل 10 أسئلة أو عند طلب المعلم تفعيلها)
+    const shouldBreak = isBreakPending || (breakInterval > 0 && nextCount % breakInterval === 0);
+
+    if (shouldBreak) {
+      setIsBreakPending(false);
+      setIsBreakActive(true);
+      // بعد ظهور نتيجة السؤال الحالي لمدة ثانيتين، ننتقل فوراً إلى شاشة الاستراحة
+      setIntermissionTimer(2);
+      setGameState('intermission');
+    } else {
+      setIntermissionTimer(2);
+      setGameState('intermission');
+    }
   };
 
-  // Intermission countdown (auto-advances to next student/question)
+  // Intermission countdown (auto-advances to next student/question or enters break)
   useEffect(() => {
     if (gameState !== 'intermission') return;
 
@@ -493,9 +556,20 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
       }, 1000);
       return () => clearTimeout(t);
     } else {
-      advanceNextTurn();
+      // إذا كانت الاستراحة مفعلة، ننتقل لشاشة الاستراحة ونوقف المؤقت حتى يضغط المعلم استئناف
+      if (isBreakActive) {
+        // يبقى في حالة الاستراحة حتى يضغط المعلم زر المتابعة
+      } else {
+        advanceNextTurn();
+      }
     }
-  }, [intermissionTimer, gameState]);
+  }, [intermissionTimer, gameState, isBreakActive]);
+
+  const resumeFromBreak = () => {
+    sounds.playTap();
+    setIsBreakActive(false);
+    advanceNextTurn();
+  };
 
   const finishGame = () => {
     try {
@@ -1017,62 +1091,171 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   </div>
                 </div>
 
-                {/* 4. معايير المسابقة: نظام التنافس، الأسئلة، الوقت */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pb-1">
-                  {/* نوع التنافس */}
-                  <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800/70 space-y-1">
-                    <span className="text-[10px] font-bold text-slate-400 block">نظام المسابقة:</span>
-                    <div className="grid grid-cols-2 gap-1">
-                      <button
-                        onClick={() => { sounds.playTap(); setCompetitionType('points'); }}
-                        className={`py-1 rounded-lg text-[11px] font-black border transition-all ${
-                          competitionType === 'points'
-                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        نقاط 🏆
-                      </button>
-                      <button
-                        onClick={() => { sounds.playTap(); setCompetitionType('sudden_death'); }}
-                        className={`py-1 rounded-lg text-[11px] font-black border transition-all ${
-                          competitionType === 'sudden_death'
-                            ? 'bg-rose-600 text-white border-rose-400 shadow-xs'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        خروج مغلوب ⚔️
-                      </button>
+                {/* 4. معايير المسابقة: نظام التنافس، الاستراحة، الأسئلة، الوقت */}
+                <div className="space-y-3 pb-1">
+                  {/* الصف الأول: نظام التنافس + جدولة الاستراحة */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* نوع التنافس */}
+                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 space-y-1.5">
+                      <span className="text-[11px] font-black text-slate-300 block">نظام المسابقة والتسجيل:</span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => { sounds.playTap(); setCompetitionType('points'); }}
+                          className={`py-1.5 rounded-lg text-xs font-black border transition-all ${
+                            competitionType === 'points'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          نقاط وجولات 🏆
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { sounds.playTap(); setCompetitionType('sudden_death'); }}
+                          className={`py-1.5 rounded-lg text-xs font-black border transition-all ${
+                            competitionType === 'sudden_death'
+                              ? 'bg-rose-600 text-white border-rose-400 shadow-sm'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          خروج مغلوب ⚔️
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* نظام الاستراحة الذكية */}
+                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 space-y-1.5">
+                      <div className="flex justify-between items-center text-[11px] font-black text-slate-300">
+                        <span className="flex items-center gap-1">
+                          <Coffee className="w-3.5 h-3.5 text-amber-400" />
+                          <span>نظام الاستراحة:</span>
+                        </span>
+                        <span className="text-amber-400 font-mono text-[10px]">
+                          {breakInterval > 0 ? `كل ${toHindi(breakInterval)} أسئلة` : 'يدوية فقط'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[
+                          { val: 10, label: '١٠ أسئلة' },
+                          { val: 15, label: '١٥ سؤال' },
+                          { val: 20, label: '٢٠ سؤال' },
+                          { val: 0, label: 'يدوية ✋' }
+                        ].map(b => (
+                          <button
+                            key={b.val}
+                            type="button"
+                            onClick={() => { sounds.playTap(); setBreakInterval(b.val); }}
+                            className={`py-1 rounded-lg text-[10px] font-black border transition-all ${
+                              breakInterval === b.val
+                                ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-xs'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {b.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
-                  {/* عدد الأسئلة مع إدخال رقم حر دون أي تقييد */}
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/70 space-y-1.5">
-                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
-                      <span>الأسئلة لكل طالب (حر):</span>
-                      <span className="text-amber-400 font-mono font-black">{toHindi(roundsPerStudent)} أسئلة</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="1"
-                        max="200"
-                        value={roundsPerStudent}
-                        onChange={e => setRoundsPerStudent(Math.max(1, Number(e.target.value) || 1))}
-                        className="w-16 bg-slate-900 border border-amber-500/50 rounded-lg py-1 px-1.5 text-center font-mono font-black text-xs text-amber-300 outline-none focus:border-amber-400"
-                        placeholder="أي رقم"
-                        title="اكتب أي عدد أسئلة تريده دون تقييد"
-                      />
-                      <div className="flex-1 grid grid-cols-4 gap-0.5">
-                        {[1, 2, 3, 5].map(cnt => (
+                  {/* الصف الثاني: التحكم السريع بعدد الأسئلة ووقت السؤال */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* عدد الأسئلة مع أزرار الزيادة السريعة والقيم الجاهزة */}
+                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 space-y-2">
+                      <div className="flex justify-between items-center text-xs font-black">
+                        <span className="text-slate-300">عدد الأسئلة لكل طالب:</span>
+                        <span className="text-amber-400 font-mono font-black text-sm bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/30">
+                          {toHindi(roundsPerStudent)} أسئلة
+                        </span>
+                      </div>
+
+                      {/* إدخال مباشر مع أزرار الزيادة والنقصان السريعة */}
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(Math.max(1, roundsPerStudent - 10)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="إنقاص ١٠ أسئلة"
+                          >
+                            -١٠
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(Math.max(1, roundsPerStudent - 5)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="إنقاص ٥ أسئلة"
+                          >
+                            -٥
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(Math.max(1, roundsPerStudent - 1)); }}
+                            className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                            title="إنقاص سؤال واحد"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <input
+                          type="number"
+                          min="1"
+                          max="200"
+                          value={roundsPerStudent}
+                          onChange={e => setRoundsPerStudent(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+                          className="w-16 bg-slate-900 border-2 border-amber-500/60 rounded-xl py-1 px-1 text-center font-mono font-black text-base text-amber-300 outline-none focus:border-amber-400 shadow-inner"
+                          title="اكتب أي رقم تريده حتى ٢٠٠ سؤال"
+                        />
+
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(Math.min(200, roundsPerStudent + 1)); }}
+                            className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                            title="زيادة سؤال واحد"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(Math.min(200, roundsPerStudent + 5)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="زيادة ٥ أسئلة"
+                          >
+                            +٥
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(Math.min(200, roundsPerStudent + 10)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="زيادة ١٠ أسئلة"
+                          >
+                            +١٠
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setRoundsPerStudent(Math.min(200, roundsPerStudent + 25)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-800 text-[10px] font-mono font-black"
+                            title="زيادة ٢٥ سؤالاً"
+                          >
+                            +٢٥
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* قيم جاهزة بنقرة واحدة */}
+                      <div className="grid grid-cols-7 gap-1 pt-0.5">
+                        {[1, 3, 5, 10, 20, 30, 50].map(cnt => (
                           <button
                             key={cnt}
                             type="button"
                             onClick={() => { sounds.playTap(); setRoundsPerStudent(cnt); }}
-                            className={`py-1 rounded text-[10px] font-black font-mono border transition-all ${
+                            className={`py-1 rounded-lg text-[10px] font-black font-mono border transition-all ${
                               roundsPerStudent === cnt
-                                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
-                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                                ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-xs'
+                                : 'bg-slate-900 border-slate-800/80 text-slate-400 hover:text-white'
                             }`}
                           >
                             {toHindi(cnt)}
@@ -1080,35 +1263,94 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                         ))}
                       </div>
                     </div>
-                  </div>
 
-                  {/* وقت الإجابة مع إدخال رقم حر دون أي تقييد */}
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/70 space-y-1.5">
-                    <div className="flex justify-between items-center text-[10px] font-bold text-slate-400">
-                      <span>وقت السؤال (حر):</span>
-                      <span className="text-amber-400 font-mono font-black">{toHindi(timeLimit)} ثوانٍ</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="1"
-                        max="300"
-                        value={timeLimit}
-                        onChange={e => setTimeLimit(Math.max(1, Number(e.target.value) || 1))}
-                        className="w-16 bg-slate-900 border border-amber-500/50 rounded-lg py-1 px-1.5 text-center font-mono font-black text-xs text-amber-300 outline-none focus:border-amber-400"
-                        placeholder="أي ثانية"
-                        title="اكتب أي وقت تريده بالثواني دون تقييد"
-                      />
-                      <div className="flex-1 grid grid-cols-4 gap-0.5">
-                        {[5, 10, 15, 20].map(sec => (
+                    {/* وقت الإجابة مع أزرار الزيادة السريعة والقيم الجاهزة */}
+                    <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 space-y-2">
+                      <div className="flex justify-between items-center text-xs font-black">
+                        <span className="text-slate-300">وقت السؤال (بالثواني):</span>
+                        <span className="text-amber-400 font-mono font-black text-sm bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/30">
+                          {toHindi(timeLimit)} ثوانٍ
+                        </span>
+                      </div>
+
+                      {/* إدخال مباشر مع أزرار الزيادة والنقصان */}
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setTimeLimit(Math.max(2, timeLimit - 10)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="إنقاص ١٠ ثوانٍ"
+                          >
+                            -١٠
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setTimeLimit(Math.max(2, timeLimit - 5)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="إنقاص ٥ ثوانٍ"
+                          >
+                            -٥
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setTimeLimit(Math.max(2, timeLimit - 1)); }}
+                            className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                            title="إنقاص ثانية واحدة"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <input
+                          type="number"
+                          min="2"
+                          max="300"
+                          value={timeLimit}
+                          onChange={e => setTimeLimit(Math.max(2, Math.min(300, Number(e.target.value) || 2)))}
+                          className="w-16 bg-slate-900 border-2 border-amber-500/60 rounded-xl py-1 px-1 text-center font-mono font-black text-base text-amber-300 outline-none focus:border-amber-400 shadow-inner"
+                          title="اكتب الوقت بالثواني"
+                        />
+
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setTimeLimit(Math.min(300, timeLimit + 1)); }}
+                            className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                            title="زيادة ثانية واحدة"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setTimeLimit(Math.min(300, timeLimit + 5)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="زيادة ٥ ثوانٍ"
+                          >
+                            +٥
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { sounds.playTap(); setTimeLimit(Math.min(300, timeLimit + 10)); }}
+                            className="px-1.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[10px] font-mono font-bold"
+                            title="زيادة ١٠ ثوانٍ"
+                          >
+                            +١٠
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* أوقات جاهزة بنقرة واحدة */}
+                      <div className="grid grid-cols-6 gap-1 pt-0.5">
+                        {[5, 10, 15, 20, 30, 45].map(sec => (
                           <button
                             key={sec}
                             type="button"
                             onClick={() => { sounds.playTap(); setTimeLimit(sec); }}
-                            className={`py-1 rounded text-[10px] font-black font-mono border transition-all ${
+                            className={`py-1 rounded-lg text-[10px] font-black font-mono border transition-all ${
                               timeLimit === sec
-                                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
-                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                                ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-xs'
+                                : 'bg-slate-900 border-slate-800/80 text-slate-400 hover:text-white'
                             }`}
                           >
                             {toHindi(sec)}ث
@@ -1260,6 +1502,25 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                     <span>{toHindi(timeLeft)} ث</span>
                   </div>
 
+                  {/* Break button after question 10 */}
+                  {totalQuestionsAnsweredCount >= 10 && (
+                    <button
+                      onClick={() => {
+                        sounds.playTap();
+                        setIsBreakPending(prev => !prev);
+                      }}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                        isBreakPending
+                          ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md animate-pulse ring-2 ring-amber-300'
+                          : 'bg-slate-950/80 hover:bg-slate-950 text-amber-300 hover:text-white border-amber-500/50'
+                      }`}
+                      title="تفعيل استراحة في المسابقة بعد إجابة السؤال الحالي"
+                    >
+                      <Coffee className="w-3.5 h-3.5" />
+                      <span>{isBreakPending ? 'استراحة قادمة ⏳' : 'استراحة ☕'}</span>
+                    </button>
+                  )}
+
                   {/* Immediate Next Question / Skip Button */}
                   <button
                     onClick={() => {
@@ -1276,8 +1537,52 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                 </div>
               </motion.div>
 
-              {/* Question Board with All 4 Options Visible (or Intermission) */}
-              {gameState === 'intermission' ? (
+              {/* Central Screen: Break Screen OR Intermission OR Active Math Question */}
+              {isBreakActive && intermissionTimer === 0 ? (
+                /* LARGE BREAK SCREEN (Without showing question) */
+                <motion.div
+                  initial={{ scale: 0.92, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="flex-1 bg-gradient-to-br from-slate-900 via-amber-950/20 to-slate-900 border-2 border-amber-500/50 p-6 sm:p-10 rounded-3xl shadow-2xl flex flex-col items-center justify-center text-center space-y-6 my-auto"
+                >
+                  <div className="relative">
+                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-amber-300 shadow-2xl shadow-amber-500/20">
+                      <Coffee className="w-14 h-14 sm:w-16 sm:h-16 animate-pulse" />
+                    </div>
+                    <span className="absolute -top-2 -right-2 bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 text-xs font-black px-3 py-1 rounded-full shadow-lg">
+                      وقت الراحة ☕
+                    </span>
+                  </div>
+
+                  <div className="space-y-3 max-w-xl">
+                    <h2 className="text-4xl sm:text-6xl font-black text-amber-400 font-['El_Messiri',serif] tracking-wide drop-shadow-md">
+                      استراحة ☕
+                    </h2>
+                    <p className="text-base sm:text-xl text-slate-200 font-bold leading-relaxed">
+                      أخذ قسط من الراحة وتنشيط الأذهان وتجديد النشاط والحماس
+                    </p>
+                    
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                      <div className="bg-slate-950/90 border border-amber-500/40 px-4 py-2 rounded-xl text-amber-300 font-mono text-sm font-black shadow-inner">
+                        🎯 تم إنجاز: {toHindi(totalQuestionsAnsweredCount)} سؤالاً
+                      </div>
+                      <div className="bg-slate-950/90 border border-amber-500/40 px-4 py-2 rounded-xl text-emerald-400 font-mono text-sm font-black shadow-inner">
+                        👑 متصدر الجولة: {rankedActiveStudents[0]?.name || '—'} ({toHindi(rankedActiveStudents[0]?.score || 0)} ن)
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 w-full max-w-sm">
+                    <button
+                      onClick={resumeFromBreak}
+                      className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 active:scale-95 text-slate-950 font-black text-lg sm:text-xl flex items-center justify-center gap-3 shadow-xl shadow-amber-500/30 cursor-pointer transition-all border-2 border-amber-300 hover:shadow-2xl"
+                    >
+                      <PlayCircle className="w-7 h-7 fill-slate-950 text-amber-400" />
+                      <span>استئناف ومتابعة المسابقة ▶️</span>
+                    </button>
+                  </div>
+                </motion.div>
+              ) : gameState === 'intermission' ? (
                 <motion.div
                   initial={{ scale: 0.95, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -1306,13 +1611,20 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                     <p className="text-sm font-bold text-slate-300 mt-1">
                       الإجابة الصحيحة هي: <span className="text-emerald-400 font-mono font-black text-base">{toHindi(currentQ?.answer ?? '')}</span>
                     </p>
-                    <p className="text-slate-400 text-xs mt-1">
-                      استعد يا <span className="text-amber-400 font-black">{nextStudent.name}</span>
-                    </p>
+                    {isBreakActive ? (
+                      <div className="mt-2 inline-flex items-center gap-1.5 bg-amber-500/20 text-amber-300 text-xs font-black px-3 py-1 rounded-full border border-amber-500/40 animate-pulse">
+                        <Coffee className="w-3.5 h-3.5" />
+                        <span>شاشة الاستراحة ستبدأ حالاً ☕</span>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400 text-xs mt-1">
+                        استعد يا <span className="text-amber-400 font-black">{nextStudent.name}</span>
+                      </p>
+                    )}
                   </div>
 
                   <div className="py-1">
-                    <span className="text-xs text-slate-400 block font-bold mb-0.5">الانتقال التلقائي خلال:</span>
+                    <span className="text-xs text-slate-400 block font-bold mb-0.5">الانتقال خلال:</span>
                     <span className="text-4xl sm:text-5xl font-black font-mono text-amber-400 animate-pulse inline-block">
                       {toHindi(intermissionTimer)}
                     </span>
@@ -1322,12 +1634,16 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                   <button
                     onClick={() => {
                       sounds.playTap();
-                      advanceNextTurn();
+                      if (isBreakActive) {
+                        setIntermissionTimer(0);
+                      } else {
+                        advanceNextTurn();
+                      }
                     }}
                     className="mt-1 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-all border border-amber-400"
                   >
                     <SkipForward className="w-4 h-4 fill-current" />
-                    <span>الانتقال للسؤال التالي الآن ⏭️</span>
+                    <span>{isBreakActive ? 'دخول الاستراحة الآن ☕' : 'الانتقال للسؤال التالي الآن ⏭️'}</span>
                   </button>
                 </motion.div>
               ) : currentQ ? (
@@ -1350,10 +1666,27 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                       const isCorrect = opt === currentQ.answer;
 
                       let style = 'bg-slate-800 hover:bg-slate-700/80 border-slate-700 text-white';
+                      let badge = null;
                       if (isAnswered) {
-                        if (isCorrect) style = 'bg-emerald-600 border-emerald-400 text-white shadow-emerald-500/40 animate-pulse';
-                        else if (isChosen) style = 'bg-red-600 border-red-400 text-white';
-                        else style = 'bg-slate-800/40 border-slate-800 text-slate-600 opacity-40';
+                        if (isCorrect) {
+                          style = 'bg-emerald-600 border-emerald-300 text-white shadow-xl shadow-emerald-500/50 ring-4 ring-emerald-400 scale-[1.03] animate-pulse';
+                          badge = (
+                            <span className="absolute -top-3.5 bg-emerald-400 text-slate-950 font-black text-[10px] sm:text-xs px-2 py-0.5 rounded-full shadow-md flex items-center gap-0.5">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>الإجابة الصحيحة ✓</span>
+                            </span>
+                          );
+                        } else if (isChosen) {
+                          style = 'bg-rose-600 border-rose-400 text-white ring-4 ring-rose-400/80';
+                          badge = (
+                            <span className="absolute -top-3.5 bg-rose-400 text-slate-950 font-black text-[10px] sm:text-xs px-2 py-0.5 rounded-full shadow-md flex items-center gap-0.5">
+                              <XCircle className="w-3 h-3" />
+                              <span>خطأ ✕</span>
+                            </span>
+                          );
+                        } else {
+                          style = 'bg-slate-800/30 border-slate-800/60 text-slate-600 opacity-30';
+                        }
                       }
 
                       return (
@@ -1361,9 +1694,10 @@ export const ClassroomDirectGame: React.FC<ClassroomDirectGameProps> = ({
                           key={i}
                           onClick={() => handleOptionSelect(opt)}
                           disabled={isAnswered}
-                          className={`py-3.5 sm:py-4 px-2 rounded-xl sm:rounded-2xl font-black text-2xl sm:text-3xl md:text-4xl border-2 transition-all shadow-md font-mono active:scale-95 flex items-center justify-center ${style}`}
+                          className={`relative py-4 sm:py-5 px-2 rounded-xl sm:rounded-2xl font-black text-2xl sm:text-3xl md:text-4xl border-2 transition-all shadow-md font-mono active:scale-95 flex flex-col items-center justify-center ${style}`}
                         >
-                          {toHindi(opt)}
+                          {badge}
+                          <span>{toHindi(opt)}</span>
                         </button>
                       );
                     })}
