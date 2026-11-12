@@ -826,23 +826,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </button>
 
           <button
-            onClick={() => { sounds.playTap(); setActiveTab('liveRooms'); }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors ${
-              activeTab === 'liveRooms'
-                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
-                : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5 text-rose-400" />
-            <span>المسابقات الحية</span>
-            {liveRooms.length > 0 && (
-              <span className="bg-rose-500 text-white px-1.5 py-0.2 rounded-full text-[9px] animate-pulse">
-                {toHindi(liveRooms.length)}
-              </span>
-            )}
-          </button>
-
-          <button
             onClick={() => { sounds.playTap(); setActiveTab('database'); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors ${
               activeTab === 'database'

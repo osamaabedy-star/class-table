@@ -708,22 +708,9 @@ export default function App() {
     });
   }, [view]);
 
-  // Poll count of active rooms
+  // Rooms polling disabled while rooms feature is inactive
   useEffect(() => {
-    const checkActiveRooms = async () => {
-      try {
-        const res = await fetch('/api/rooms');
-        if (res.ok) {
-          const data = await res.json();
-          setActiveRoomsCount((data.rooms || []).length);
-        }
-      } catch {
-        // ignore
-      }
-    };
-    checkActiveRooms();
-    const t = setInterval(checkActiveRooms, 3000);
-    return () => clearInterval(t);
+    // Inactive to keep the network and client calm and clutter-free
   }, []);
 
   // Room polling (Securely authorized via host token or student masked)
@@ -1070,136 +1057,114 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Hub: Clean, Balanced, 2 Professional Core Cards */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-3xl mx-auto w-full my-auto space-y-4">
-        {/* Title */}
-        <div className="text-center">
-          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+      {/* Main Hub: Calm, Spacious, Luxurious 2-Card Layout (Uncluttered) */}
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 sm:p-6 max-w-4xl mx-auto w-full my-auto space-y-6">
+        {/* Title & Subtitle */}
+        <div className="text-center space-y-2">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight font-['El_Messiri',serif]">
             مسابقة جدول الضرب والحساب الذهني
           </h1>
+          <p className="text-xs sm:text-sm text-slate-400 font-bold max-w-lg mx-auto">
+            منصة مدارس رياض الإبداع الأهلية التفاعلية • تنمية مهارات الحساب الذهني وسرعة البديهة
+          </p>
         </div>
 
-        {/* 2 Core Cards (Symmetrical, Direct Action, Zero Redundancy) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 w-full">
+        {/* 2 Core Cards: Spacious, Symmetrical & Direct */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 w-full pt-2">
           {/* Card 1: Classroom Smart Board Mode */}
           <motion.div
-            whileHover={{ y: -2, scale: 1.01 }}
-            className="p-4 rounded-2xl bg-slate-900 border border-amber-500/30 text-white shadow-xl text-right flex flex-col justify-between space-y-3"
+            whileHover={{ y: -3, scale: 1.01 }}
+            className="p-6 rounded-3xl bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 border-2 border-amber-500/40 hover:border-amber-400/80 text-white shadow-2xl shadow-amber-500/10 text-right flex flex-col justify-between space-y-5 transition-all"
           >
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                <Trophy className="w-5 h-5" />
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-400/40 text-amber-400 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/10">
+                  <Trophy className="w-7 h-7" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block">
+                    للشاشات والسبورات الذكية
+                  </span>
+                  <h3 className="text-xl font-black text-white font-['El_Messiri',serif]">
+                    مسابقة السبورة الصفية
+                  </h3>
+                </div>
               </div>
-              <h3 className="text-base font-black text-white">
-                مسابقة السبورة الصفية
-              </h3>
+
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                تنافس صفي مباشر بين الطلاب بنظام الدور • بنك أسئلة شامل بدون أي تكرار • استراحة مجدولة • تحديد فوري للإجابة الصحيحة.
+              </p>
+
+              {/* Feature Badges */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[10px] font-bold bg-amber-500/10 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-500/30">
+                  🎯 بدون تكرار
+                </span>
+                <span className="text-[10px] font-bold bg-amber-500/10 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-500/30">
+                  ☕ استراحة ذكية
+                </span>
+                <span className="text-[10px] font-bold bg-amber-500/10 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-500/30">
+                  🏆 ترتيب وفرسان
+                </span>
+              </div>
             </div>
 
             <button
               onClick={() => { sounds.playTap(); setView('direct_board'); }}
-              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition-colors"
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 active:scale-95 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-amber-500/25 transition-all border border-amber-300 cursor-pointer"
             >
-              <span>بدء مسابقة السبورة</span>
+              <span>بدء مسابقة السبورة الصفية</span>
               <ChevronLeft className="w-4 h-4" />
             </button>
           </motion.div>
 
-          {/* Card 2: Online Multiplayer Challenge */}
+          {/* Card 2: Solo Practice Blitz */}
           <motion.div
-            whileHover={{ y: -2, scale: 1.01 }}
-            className="p-4 rounded-2xl bg-slate-900 border border-indigo-500/30 text-white shadow-xl text-right flex flex-col justify-between space-y-2.5"
+            whileHover={{ y: -3, scale: 1.01 }}
+            className="p-6 rounded-3xl bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 border-2 border-indigo-500/40 hover:border-indigo-400/80 text-white shadow-2xl shadow-indigo-500/10 text-right flex flex-col justify-between space-y-5 transition-all"
           >
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center shrink-0">
-                <Swords className="w-5 h-5" />
-              </div>
-              <h3 className="text-base font-black text-white">
-                التحدي الأونلاين
-              </h3>
-            </div>
-
-            {/* Quick Join Inputs on Card */}
-            <div className="space-y-1.5 bg-slate-950/70 p-2 rounded-xl border border-slate-800">
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="اسم الطالب"
-                    value={quickStudentName}
-                    onChange={e => setQuickStudentName(e.target.value)}
-                    className="w-full bg-slate-800/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs font-bold text-white outline-none focus:border-indigo-400 placeholder:text-slate-500"
-                  />
-                  {schoolStudents.length > 0 && (
-                    <button
-                      onClick={() => { setPickerTarget('home'); setIsPickerOpen(true); }}
-                      className="absolute left-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-amber-400 hover:text-amber-300"
-                      title="قائمة المدرسة"
-                    >
-                      <GraduationCap className="w-3 h-3" />
-                    </button>
-                  )}
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-indigo-500/20 border border-indigo-400/40 text-indigo-400 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/10">
+                  <Flame className="w-7 h-7 text-indigo-300" />
                 </div>
-
-                <input
-                  type="text"
-                  placeholder="رمز الغرفة"
-                  maxLength={8}
-                  value={quickRoomCode.toUpperCase()}
-                  onChange={e => setQuickRoomCode(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-800/80 border border-slate-700/80 rounded-lg px-2 py-1.5 text-xs font-mono font-black text-amber-400 text-center uppercase tracking-wider outline-none focus:border-amber-400 placeholder:text-slate-500"
-                />
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block">
+                    تحدي فردي سريع
+                  </span>
+                  <h3 className="text-xl font-black text-white font-['El_Messiri',serif]">
+                    التدريب الفردي (Solo Blitz)
+                  </h3>
+                </div>
               </div>
 
-              <button
-                onClick={() => handleJoinRoom(quickRoomCode, quickStudentName)}
-                disabled={!quickRoomCode.trim() || !quickStudentName.trim()}
-                className="w-full py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center gap-1 transition-colors"
-              >
-                <span>دخول الغرفة</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                تدريب مكثف للطالب لترسيخ جداول الضرب والقسمة • سباق سرعة بديهة مع المؤقت • تسجيل أرقام قياسية ونقاط متتالية متصاعدة.
+              </p>
+
+              {/* Feature Badges */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[10px] font-bold bg-indigo-500/10 text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-500/30">
+                  ⚡ سرعة بديهة
+                </span>
+                <span className="text-[10px] font-bold bg-indigo-500/10 text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-500/30">
+                  🔥 نقاط متتالية
+                </span>
+                <span className="text-[10px] font-bold bg-indigo-500/10 text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-500/30">
+                  🎖️ شهادات تميز
+                </span>
+              </div>
             </div>
 
-            {/* Create Room Buttons */}
-            <div className="flex gap-1.5 pt-0.5 border-t border-slate-800/80">
-              <button
-                onClick={() => { sounds.playTap(); setCreateType('duel'); setView('create'); }}
-                className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition-colors"
-              >
-                تحدي (١ ضد ١)
-              </button>
-              <button
-                onClick={() => { sounds.playTap(); setCreateType('group'); setView('create'); }}
-                className="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold transition-colors"
-              >
-                غرفة جماعية
-              </button>
-            </div>
+            <button
+              onClick={() => { sounds.playTap(); setView('solo_practice'); }}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-600 hover:from-indigo-500 hover:to-indigo-400 active:scale-95 text-white font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/25 transition-all border border-indigo-400 cursor-pointer"
+            >
+              <span>بدء التدريب الفردي السريع ⚡</span>
+              <ChevronLeft className="w-4 h-4" />
+            </button>
           </motion.div>
         </div>
-
-        {/* Card 3: Solo Practice Blitz */}
-        <motion.div
-          whileHover={{ y: -1 }}
-          className="w-full p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 text-white shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 text-right"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
-              <Flame className="w-5 h-5 text-amber-400" />
-            </div>
-            <h4 className="text-sm font-black text-white">
-              التدريب الفردي السريع (Solo Blitz)
-            </h4>
-          </div>
-
-          <button
-            onClick={() => { sounds.playTap(); setView('solo_practice'); }}
-            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all shrink-0"
-          >
-            <span>بدء التدريب الفردي ⚡</span>
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-        </motion.div>
       </main>
 
       {/* Footer Branding */}
