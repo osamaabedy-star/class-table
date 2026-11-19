@@ -5,6 +5,7 @@
 
 import { exportResultsToExcel } from '../utils/exportExcel';
 import { toHindi } from '../utils/format';
+import { QuestionAttemptLog } from '../utils/competitionAnalytics';
 
 export interface TestParticipant {
   id: string;
@@ -16,6 +17,7 @@ export interface TestParticipant {
   rank: number;
   eliminated?: boolean;
   timeSpent?: number;
+  questionLogs?: QuestionAttemptLog[];
 }
 
 export interface TestSessionRecord {

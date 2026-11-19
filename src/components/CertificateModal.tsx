@@ -24,7 +24,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
   score,
   totalQuestions,
   correctCount,
-  teacherName: initialTeacher = 'أ/ أسامة إبراهيم',
+  teacherName: initialTeacher = 'أ/ أسامة إبراهيم الأبيدي',
   title = 'مسابقة جدول الضرب الكبرى',
   rank = 1
 }) => {
@@ -37,7 +37,9 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
 
   if (!isOpen) return null;
 
-  const percentage = Math.round((correctCount / Math.max(1, totalQuestions)) * 100);
+  const exactPercentage = (correctCount / Math.max(1, totalQuestions)) * 100;
+  if (exactPercentage <= 90) return null;
+  const percentage = Math.round(exactPercentage);
   const todayRaw = new Date().toLocaleDateString('ar-SA', {
     year: 'numeric',
     month: 'long',
@@ -176,7 +178,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
         <div className="cert-non-printable flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800 text-xs">
           <div className="flex items-center gap-2 text-amber-400 font-bold">
             <Award className="w-4 h-4 text-amber-400" />
-            <span className="font-black text-xs sm:text-sm">شهادة تفوق أفقية (Landscape) متوافقة تماماً مع الشاشة والطباعة</span>
+            <span className="font-black text-xs sm:text-sm">شهادة تفوق أفقية متوافقة تماماً مع الشاشة والطباعة</span>
           </div>
 
           <div className="flex items-center flex-wrap gap-1.5">
@@ -219,7 +221,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
               title="تحميل الشهادة كصورة أفقية عالية الجودة"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>{isDownloading ? 'جاري التحميل...' : 'حفظ كصورة أفقية (PNG)'}</span>
+              <span>{isDownloading ? 'جاري التحميل...' : 'حفظ كصورة عالية الجودة'}</span>
             </button>
 
             {/* Print Landscape */}
@@ -324,11 +326,15 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
           <div className="relative text-center my-auto space-y-1.5 sm:space-y-2.5 px-3 z-10">
             {/* Ribbon Badge */}
             <div className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full border text-[10px] sm:text-xs font-black shadow-xs ${theme.badgeBg}`}>
-              <span>🥇 وسام المركز الأول وبطل مسابقة الرياضيات</span>
+              <span>
+                {rank === 1
+                  ? '🥇 وسام المركز الأول وبطل مسابقة الرياضيات'
+                  : '🌟 وسام التفوق والامتياز (اجتياز ٩٠٪)'}
+              </span>
             </div>
 
             <p className={`text-xs sm:text-sm font-bold ${theme.subtext}`}>
-              تَسُرُّ إدارة مدارس رياض الإبداع ومُعَلِّم الرياضيات أن يمنح هذه الشهادة للبطل المتفوق:
+              تَسُرُّ إدارة مدارس رياض الإبداع ومُعَلِّم الرياضيات أن يمنح هذه الشهادة للطالب المتفوق:
             </p>
 
             {/* Prominent Student Name Banner (Calligraphic Box) */}
@@ -340,8 +346,16 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
 
             {/* Achievement Paragraph */}
             <p className={`text-xs sm:text-sm leading-relaxed font-medium max-w-2xl mx-auto ${theme.subtext}`}>
-              وذلك نظير تحقيقه <span className="font-black text-amber-500">المركز الأول 🥇</span> وفوزه بلقب بطل المسابقة بحصوله على{' '}
-              <span className="font-black underline">{toHindi(score)} درجات</span> بنسبة إتقان{' '}
+              وذلك نظير {rank === 1 ? (
+                <>
+                  تحقيقه <span className="font-black text-amber-500">المركز الأول 🥇</span> وفوزه بلقب بطل المسابقة
+                </>
+              ) : (
+                <>
+                  تفوقه المتميز وحصوله على <span className="font-black text-amber-500">المركز {toHindi(rank)} 🌟</span>
+                </>
+              )}{' '}
+              بحصوله على <span className="font-black underline">{toHindi(score)} درجات</span> بنسبة إتقان{' '}
               <span className="font-black text-emerald-500">{toHindi(percentage)}٪</span> في{' '}
               <span className="font-bold">{title}</span>، سائلين الله له دوام الإبداع والتفوق العلمي.
             </p>

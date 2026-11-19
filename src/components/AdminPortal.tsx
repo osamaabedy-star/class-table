@@ -1448,7 +1448,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           </div>
                         </div>
 
-                        {/* Points & Certificate Button */}
+                        {/* Points & Certificate Button (>90% only) */}
                         <div className="flex items-center gap-1.5 shrink-0">
                           <div className="text-left font-mono">
                             <span className="text-xs font-black text-amber-400 block">
@@ -1457,13 +1457,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             <span className="text-[9px] text-slate-500">نقطة</span>
                           </div>
 
-                          <button
-                            onClick={() => onOpenCertificate(student.name, student.totalScore, student.correctCount, student.totalAnswered || 10)}
-                            className="p-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition-colors"
-                            title="طباعة شهادة تفوق"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                          </button>
+                          {(student.totalAnswered || 0) > 0 && (student.correctCount / student.totalAnswered) * 100 > 90 && (
+                            <button
+                              onClick={() => onOpenCertificate(student.name, student.totalScore, student.correctCount, student.totalAnswered)}
+                              className="p-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition-colors"
+                              title="طباعة شهادة تفوق (أكثر من ٩٠٪)"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );

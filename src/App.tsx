@@ -1133,13 +1133,13 @@ export default function App() {
                     تحدي فردي سريع
                   </span>
                   <h3 className="text-xl font-black text-white font-['El_Messiri',serif]">
-                    التدريب الفردي (Solo Blitz)
+                    التدريب الفردي السريع
                   </h3>
                 </div>
               </div>
 
               <p className="text-xs text-slate-300 font-medium leading-relaxed">
-                تدريب مكثف للطالب لترسيخ جداول الضرب والقسمة • سباق سرعة بديهة مع المؤقت • تسجيل أرقام قياسية ونقاط متتالية متصاعدة.
+                تدريب مكثف للطالب مع اختيار عدد الأسئلة والوقت • ترسيخ جداول الضرب والقسمة • شهادات تفوق للمتميزين فوق ٩٠٪.
               </p>
 
               {/* Feature Badges */}
@@ -1647,8 +1647,8 @@ export default function App() {
                       <span className="text-xs font-black text-emerald-400">({toHindi(pct)}٪)</span>
                     </div>
 
-                    {/* Certificate Button EXCLUSIVELY for 1st Place Winner */}
-                    {isWinner ? (
+                    {/* Certificate Button EXCLUSIVELY for 1st Place Winner with >90% */}
+                    {isWinner && (s.correctCount / Math.max(1, totalQ)) * 100 > 90 ? (
                       <button
                         onClick={() => {
                           sounds.playTap();
@@ -1668,7 +1668,7 @@ export default function App() {
                       </button>
                     ) : (
                       <span className="text-xs font-bold text-slate-500 px-2">
-                        {idx === 1 ? 'المركز الثاني' : idx === 2 ? 'المركز الثالث' : `المركز ${toHindi(idx + 1)}`}
+                        {isWinner ? 'المركز الأول' : idx === 1 ? 'المركز الثاني' : idx === 2 ? 'المركز الثالث' : `المركز ${toHindi(idx + 1)}`}
                       </span>
                     )}
                   </div>
@@ -1710,13 +1710,18 @@ export default function App() {
       {view === 'direct_board' && (
         <ClassroomDirectGame
           onBack={() => setView('home')}
-          onOpenCertificate={(name, score, correct, total) => {
+          onOpenCertificate={(name, score, correct, total, rank = 1) => {
+            if ((correct / Math.max(1, total)) * 100 <= 90) {
+              showToast('تُمنح الشهادة فقط لمن يحصل على نسبة أكثر من ٩٠٪');
+              return;
+            }
             setCertData({
               isOpen: true,
               studentName: name,
               score,
               correctCount: correct,
-              total
+              total,
+              rank
             });
           }}
         />
@@ -1725,12 +1730,17 @@ export default function App() {
         <AdminPortal
           onBack={() => setView('home')}
           onOpenCertificate={(name, score, correct, total) => {
+            if ((correct / Math.max(1, total)) * 100 <= 90) {
+              showToast('تُمنح الشهادة فقط لمن يحصل على نسبة أكثر من ٩٠٪');
+              return;
+            }
             setCertData({
               isOpen: true,
               studentName: name,
               score,
               correctCount: correct,
-              total
+              total,
+              rank: 1
             });
           }}
         />
@@ -1738,6 +1748,20 @@ export default function App() {
       {view === 'solo_practice' && (
         <SoloPracticeGame
           onBack={() => setView('home')}
+          onOpenCertificate={(name, score, correct, total, rank = 1) => {
+            if ((correct / Math.max(1, total)) * 100 <= 90) {
+              showToast('تُمنح الشهادة فقط لمن يحصل على نسبة أكثر من ٩٠٪');
+              return;
+            }
+            setCertData({
+              isOpen: true,
+              studentName: name,
+              score,
+              correctCount: correct,
+              total,
+              rank
+            });
+          }}
         />
       )}
 
@@ -1802,7 +1826,7 @@ export default function App() {
         score={certData.score}
         correctCount={certData.correctCount}
         totalQuestions={certData.total}
-        teacherName="أ/ أسامة إبراهيم"
+        teacherName="أ/ أسامة إبراهيم الأبيدي"
         title="تحدي جدول الضرب"
         rank={certData.rank}
       />
